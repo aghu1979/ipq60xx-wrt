@@ -415,10 +415,10 @@ jobs:
         with:
           path: |
             /workdir/openwrt/dl
-            - /workdir/openwrt/build_dir
+            /workdir/openwrt/build_dir
             /workdir/openwrt/staging_dir
             /workdir/openwrt/bin/packages
-          key: third-party-${{ needs.generate-matrix.outputs.chipset }}-${{ runner.os }}-$(sha256sum ${{ env.SCRIPT_DIY }} | cut -d' ' -f1)
+          key: third-party-${{ needs.generate-matrix.outputs.chipset }}-${{ runner.os }}-$(sha256sum ${{ env.SCRIPT_DIY }} | cut -d' -f1)
           restore-keys: |
             third-party-${{ needs.generate-matrix.outputs.chipset }}-${{ runner.os }}-
 
@@ -440,7 +440,7 @@ jobs:
     
     env:
       LOG_FILE: build-${{ matrix.repo_name }}-${{ matrix.chipset }}-${{ matrix.device }}-${{ matrix.profile }}.log
-      ARTIFACT_NAME: ${{ matrix.repo_name }}-${{ matrix.chipset }}-${{ matrix.device }}-${{ matrix.profile }}
+      ARTIFACT_NAME: ${{ matrix.repo_name }}-${{ matrix.chipset }}-${{ matrix.device }}-${{ matrix.profile }}.log
     
     steps:
       - name: 检出代码
@@ -455,7 +455,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ccache-${{ matrix.chipset }}-${{ runner.os }}-$(sha256sum ${{ env.SCRIPT_DIY }} | cut -d' ' -f1)
+          key: ccache-${{ matrix.chipset }}-${{ runner.os }}-$(sha256sum ${{ env.SCRIPT_DIY }} | cut -d' -f1)
           restore-keys: |
             ccache-${{ matrix.chipset }}-${{ runner.os }}-
 
@@ -515,7 +515,7 @@ jobs:
             /workdir/openwrt/build_dir
             /workdir/openwrt/staging_dir
             /workdir/openwrt/bin/packages
-          key: third-party-${{ matrix.chipset }}-${{ runner.os }}-$(sha256sum ${{ env.SCRIPT_DIY }} | cut -d' ' -f1)
+          key: third-party-${{ needs.generate-matrix.outputs.chipset }}-${{ runner.os }}-$(sha256sum ${{ env.SCRIPT_DIY }} | cut -d' -f1)
 
       - name: 编译固件
         run: |
@@ -531,27 +531,84 @@ jobs:
           source ${{ env.SCRIPT_LIB }}
           log_info "整理产物..."
           mkdir -p "$ARTIFACT_NAME"
+          
+          # 查找并复制固件文件
           echo '${{ env.FIRMWARE_TYPES }}' | jq -r '.[]' | while read type; do
             log_info "正在查找固件类型: $type"
             FIRMWARE_PATH=$(find bin/targets -name "*${{ matrix.device }}*${type}" | head -n 1)
             if [ -n "$FIRMWARE_PATH" ]; then 
               log_success "找到固件: $FIRMWARE_PATH"; 
               cp "$FIRMWARE_PATH" "$ARTIFACT_NAME/"; 
+              # 获取固件大小并记录
+              FIRMWARE_SIZE=$(stat -c%s "$FIRMWARE_PATH" | cut -d' ' -f1)
+              log_info "固件大小: $FIRMWARE_SIZE bytes"
             else 
               log_warning "未找到类型为 $type 的固件，跳过。"; 
             fi
           done
-          cp .config "$ARTIFACT_NAME.config"
-          cp bin/targets/*/config.buildinfo "$ARTIFACT_NAME/"
-          cp bin/targets/*/manifest "$ARTIFACT_NAME/"
+          
+          # 复制配置文件
+          if [ -f ".config" ]; then
+            cp .config "$ARTIFACT_NAME.config"
+            log_info "已添加配置文件"
+          else
+            log_warning "配置文件不存在"
+          fi
+          
+          # 复制构建信息
+          if [ -f "bin/targets/*/config.buildinfo" ]; then
+            cp bin/targets/*/config.buildinfo "$ARTIFACT_NAME/"
+            log_info "已添加构建信息文件"
+          else
+            log_warning "构建信息文件不存在"
+          fi
+          
+          # 复制清单文件
+          if [ -f "bin/targets/*/manifest" ]; then
+            cp bin/targets/*/manifest "$ARTIFACTACT_NAME/"
+            log_info "已添加清单文件"
+          else
+            log_warning "清单文件不存在"
+          fi
+          
+          # 打包软件包
           PACKAGES_DIR=$(find bin/targets -type d -name packages | head -n 1)
           if [ -n "$PACKAGES_DIR" ]; then 
-            tar -czf "$ARTIFACT_NAME/packages.tar.gz" -C "$PACKAGES_DIR" .; 
+            log_info "打包软件包..."
+            tar -czf "$ARTIFACT_NAME/packages.tar.gz" -C "$PACKAGES_DIR" . 
+            PACKAGES_SIZE=$(stat -c%s "$ARTIFACT_NAME/packages.tar.gz" | cut -d' ' -f1)
+            log_info "软件包大小: $PACKAGES_SIZE bytes"
           else 
             log_warning "未找到 packages 目录，将跳过打包。"; 
             touch "$ARTIFACT_NAME/packages.tar.gz"; 
           fi
-          cp "$LOG_FILE" "$ARTIFACT_NAME/"
+          
+          # 复制日志文件
+          if [ -f "$LOG_FILE" ]; then
+            cp "$LOG_FILE" "$ARTIFACT_NAME/"
+            LOG_SIZE=$(stat -c%s "$ARTIFACT_NAME/$(basename $LOG_FILE)" | cut -d' ' -f1)
+            log_info "日志文件大小: $LOG_SIZE bytes"
+          else
+            log_warning "日志文件不存在"
+          fi
+          
+          # 创建产物信息文件
+          cat << EOF > "$ARTIFACT_NAME/info.txt"
+构建信息
+=========
+构建时间: $(date '+%Y-%m-%d %H:%M:%S')
+芯片架构: ${{ matrix.chipset }}
+设备型号: ${{ matrix.device }}
+配置文件: ${{ matrix.profile }}
+固件类型: $(echo '${{ env.FIRMWARE_TYPES }}' | jq -r '.[]' | tr '\n' ', ')
+构建ID: ${{ github.run_id }}
+提交哈希: ${{ github.sha }}
+EOF
+          
+          # 列出所有文件大小
+          log_info "=== 产物文件列表及大小 ==="
+          ls -lh "$ARTIFACT_NAME/" || log_error "无法列出产物文件"
+          
           log_success "所有产物整理完成。"
 
       - name: 上传构建产物
@@ -566,7 +623,7 @@ jobs:
     if: success() && needs.generate-matrix.outputs.release-tag != ''
     runs-on: ubuntu-latest
     steps:
-      - name: 检出代码
+      - name: 检查出代码
         uses: actions/checkout@v4
 
       - name: 设置脚本执行权限
@@ -584,18 +641,159 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.generate-matrix.outputs.release-tag }}
           CHIPSET_NAME: ${{ github.event.inputs.chipset || env.DEFAULT_CHIPSET }}
+          BRANCH_NAME: ${{ github.ref_name }}
+          UBUNTU_VERSION: ${{ runner.os }}
         run: |
           source ${{ env.SCRIPT_LIB }}
+          cd openwrt
+          
           log_info "正在创建 Release: $TAG"
-          MANIFEST_FILE=$(find artifacts -name 'manifest' | head -n 1)
+          
+          # 查找manifest文件
+          MANIFEST_FILE=$(find artifacts -name "manifest" | head -n 1)
+          if [ -z "$MANIFEST_FILE" ]; then
+            log_warning "未找到manifest文件，使用默认内容"
+            # 创建一个临时的manifest文件
+            echo "PACKAGE_NAME VERSION" > "$MANIFEST_FILE"
+          fi
+          
+          log_info "使用manifest文件: $MANIFEST_FILE"
+          
+          # 生成Release Notes
           $GITHUB_WORKSPACE/${{ env.SCRIPT_BUILD_HELPER }} generate-notes "$MANIFEST_FILE" release_notes.md
+          
+          # 检查Release Notes是否生成成功
+          if [ ! -f "release_notes.md" ]; then
+            log_error "Release Notes生成失败"
+            exit 1
+          fi
+          
+          log_info "Release Notes内容预览:"
+          head -20 release_notes.md
+          
+          # 删除已存在的Release
           if gh release view "$TAG" > /dev/null 2>&1; then
             log_warning "Release $TAG 已存在，正在删除..."
-            gh release delete "$TAG" --yes
-            git push origin --delete "$TAG" || true
+            gh release delete "$TAG" --yes || log_warning "删除Release失败，继续创建新的"
+            git push origin --delete "$TAG" || log_warning "删除远程标签失败，继续创建新的"
           fi
-          gh release create "$TAG" --title "OpenWrt Firmware for $CHIPSET_NAME ($(date '+%Y-%m-%d'))" --notes-file release_notes.md --latest artifacts/**/*
+          
+          # 创建新的Release
+          log_info "创建新的Release: $TAG"
+          gh release create "$TAG" \
+            --title "OpenWrt Firmware for $CHIPSET_NAME ($(date '+%Y-%m-%d'))" \
+            --notes-file release_notes.md \
+            --latest \
+            --draft false \
+            artifacts/**/* || {
+              log_error "创建Release失败"
+              exit 1
+            }
+          
           log_success "Release $TAG 发布成功！"
+
+      - name: 验证Release
+        run: |
+          source ${{ env.SCRIPT_LIB }}
+          TAG="${{ needs.generate-matrix.outputs.release-tag }}"
+          
+          log_info "验证Release: $TAG"
+          
+          # 检查Release是否存在
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            log_success "Release $TAG 存在"
+            
+            # 列出Release中的文件
+            log_info "Release中的文件:"
+            gh release view "$TAG" --json | jq -r '.assets[].name' | head -20
+            
+            # 检查Release Notes
+            log_info "Release Notes:"
+            gh release view "$TAG" --json | jq -r '.body' | head -20
+          else
+            log_error "Release $TAG 不存在"
+            exit 1
+          fi
+
+  # 新增：更新构建状态徽章
+  update-build-status:
+    needs: [create-release]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置脚本执行权限
+        run: |
+          chmod +x scripts/*.sh
+          chmod +x configs/*.json
+
+      - name: 更新构建状态徽章
+        run: |
+          source ${{ env.SCRIPT_LIB }}
+          
+          # 根据构建结果设置徽章状态
+          if [ "${{ needs.create-release.result }}" == "success" ]; then
+            STATUS="passing"
+            COLOR="brightgreen"
+            MESSAGE="Build%20Success"
+          else
+            STATUS="failing"
+            COLOR="red"
+            MESSAGE="Build%20Failed"
+          fi
+          
+          # 更新README中的徽章
+          sed -i "s|https://img.shields.io/badge/build-.*-.*|https://img.shields.io/badge/build-${MESSAGE}-${COLOR}?style=flat-square|g" README.md
+          
+          # 提交更改
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add README.md
+          git diff --staged --quiet || git commit -m "Update build status badge [skip ci]"
+          git push
+
+  # 新增：记录构建统计
+  record-build-stats:
+    needs: [generate-matrix, build-firmware]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置脚本执行权限
+        run: |
+          chmod +x scripts/*.sh
+          chmod +x configs/*.json
+
+      - name: 记录构建统计
+        run: |
+          source ${{ env.SCRIPT_LIB }}
+          
+          # 创建或更新构建统计文件
+          STATS_FILE="build-stats.json"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          CHIPSET="${{ needs.generate-matrix.outputs.chipset }}"
+          RESULT="${{ needs.build-firmware.result }}"
+          
+          # 如果文件不存在，创建空数组
+          if [ ! -f "$STATS_FILE" ]; then
+            echo "[]" > "$STATS_FILE"
+          fi
+          
+          # 添加新的构建记录
+          jq --arg timestamp "$TIMESTAMP" --arg chipset "$CHIPSET" --arg result "$RESULT" \
+            '. += [{timestamp: $timestamp, chipset: $chipset, result: $result}]' \
+            "$STATS_FILE" > tmp.json && mv tmp.json "$STATS_FILE"
+          
+          # 提交更改
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add "$STATS_FILE"
+          git diff --staged --quiet || git commit -m "Record build statistics [skip ci]"
+          git push
 
   # 新增：更新构建状态徽章
   update-build-status:

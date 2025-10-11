@@ -4,9 +4,50 @@
 # 设置错误退出
 set -euo pipefail
 
-# 加载日志函数
-source "$(dirname "$0")/build-helper.sh"
+# 加载函数库
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+# ==================== 配置变量 ====================
+# 默认IP和主机名
+readonly DEFAULT_LAN_IP="192.168.111.1"
+readonly DEFAULT_HOSTNAME="WRT"
+
+# 要移除的包列表
+readonly PACKAGES_TO_REMOVE=(
+    "feeds/luci/applications/luci-app-appfilter"
+    "feeds/luci/applications/luci-app-frpc"
+    "feeds/luci/applications/luci-app-frps"
+    "feeds/packages/net/open-app-filter"
+    "feeds/packages/net/adguardhome"
+    "feeds/packages/net/ariang"
+    "feeds/packages/net/frp"
+    "feeds/packages/lang/golang"
+)
+
+# 第三方包仓库
+readonly GOLANG_REPO="https://github.com/sbwml/packages_lang_golang"
+readonly OPENLIST_REPO="https://github.com/sbwml/luci-app-openlist2"
+readonly LAIPENG_PACKAGES_REPO="https://github.com/laipeng668/packages"
+readonly LAIPENG_LUCI_REPO="https://github.com/laipeng668/luci"
+readonly VIKINGYFY_PACKAGES_REPO="https://github.com/VIKINGYFY/packages"
+readonly GECOOSAC_REPO="https://github.com/lwb1978/openwrt-gecoosac"
+readonly ATHENA_LED_REPO="https://github.com/NONGFAH/luci-app-athena-led"
+readonly KENZOK8_SMALL_REPO="https://github.com/kenzok8/small-package"
+
+# Mary定制包列表
+readonly MARY_PACKAGES=(
+    "https://github.com/sirpdboy/luci-app-netspeedtest:package/netspeedtest"
+    "https://github.com/sirpdboy/luci-app-partexp:package/luci-app-partexp"
+    "https://github.com/sirpdboy/luci-app-taskplan:package/luci-app-taskplan"
+    "https://github.com/tailscale/tailscale:package/tailscale"
+    "https://github.com/gdy666/luci-app-lucky:package/luci-app-lucky"
+    "https://github.com/destan19/OpenAppFilter.git:package/OpenAppFilter"
+    "https://github.com/nikkinikki-org/OpenWrt-momo:package/luci-app-momo"
+    "https://github.com/nikkinikki-org/OpenWrt-nikki:package/nikki"
+    "https://github.com/vernesong/OpenClash:package/OpenClash"
+)
+
+# ==================== 函数定义 ====================
 # 阶段1: 在 feeds update 之前执行
 pre_feeds() {
     log_info "执行 DIY: 加载第三方软件源..."
@@ -28,28 +69,16 @@ post_feeds() {
     log_success "默认设置修改完成。"
 }
 
-# 执行实际的DIY操作
-execute_diy() {
-    log_info "开始执行DIY操作..."
-    
-    # 修改默认IP & 固件名称 & 编译署名
+# 修改默认配置
+modify_default_config() {
     log_info "修改默认IP和主机名..."
-    sed -i 's/192.168.1.1/192.168.111.1/g' package/base-files/files/bin/config_generate
-    sed -i "s/hostname='.*'/hostname='WRT'/g" package/base-files/files/bin/config_generate
+    sed -i "s/192.168.1.1/$DEFAULT_LAN_IP/g" package/base-files/files/bin/config_generate
+    sed -i "s/hostname='.*'/hostname='$DEFAULT_HOSTNAME'/g" package/base-files/files/bin/config_generate
+}
 
-    # 移除要替换的包
+# 移除要替换的包
+remove_packages() {
     log_info "移除要替换的包..."
-    PACKAGES_TO_REMOVE=(
-        "feeds/luci/applications/luci-app-appfilter"
-        "feeds/luci/applications/luci-app-frpc"
-        "feeds/luci/applications/luci-app-frps"
-        "feeds/packages/net/open-app-filter"
-        "feeds/packages/net/adguardhome"
-        "feeds/packages/net/ariang"
-        "feeds/packages/net/frp"
-        "feeds/packages/lang/golang"
-    )
-
     for package in "${PACKAGES_TO_REMOVE[@]}"; do
         if [ -d "$package" ]; then
             rm -rf "$package"
@@ -58,102 +87,100 @@ execute_diy() {
             log_warning "包不存在，跳过: $package"
         fi
     done
+}
 
-    # Git稀疏克隆，只克隆指定目录到本地
-    function git_sparse_clone() {
-        local branch="$1"
-        local repourl="$2"
-        shift 2
-        
-        log_info "稀疏克隆 $repourl (分支: $branch, 目录: $@)"
-        
-        # 创建临时目录
-        local temp_dir=$(mktemp -d)
-        cd "$temp_dir"
-        
-        # 克隆仓库
-        if ! git clone --depth=1 -b "$branch" --single-branch --filter=blob:none --sparse "$repourl"; then
-            log_error "克隆仓库失败: $repourl"
-            cd - && rm -rf "$temp_dir"
-            return 1
-        fi
-        
-        # 获取仓库名称
-        local repodir=$(echo "$repourl" | awk -F '/' '{print $(NF)}')
-        cd "$repodir"
-        
-        # 设置稀疏检出
-        if ! git sparse-checkout set "$@"; then
-            log_error "设置稀疏检出失败: $@"
-            cd - && rm -rf "$temp_dir"
-            return 1
-        fi
-        
-        # 移动文件到目标位置
-        for dir in "$@"; do
-            if [ -d "$dir" ]; then
-                mv -f "$dir" "$GITHUB_WORKSPACE/package/"
-                log_info "已添加: $dir"
-            else
-                log_warning "目录不存在: $dir"
-            fi
-        done
-        
-        # 清理临时目录
-        cd - && rm -rf "$temp_dir"
-    }
-
-    # 添加第三方包
-    log_info "添加第三方包..."
-    # Go & OpenList & ariang & frp & AdGuardHome & WolPlus & Lucky & OpenAppFilter & 集客无线AC控制器 & 雅典娜LED控制
-    git clone --depth=1 https://github.com/sbwml/packages_lang_golang feeds/packages/lang/golang
-    git clone --depth=1 https://github.com/sbwml/luci-app-openlist2 package/openlist
-    git_sparse_clone ariang https://github.com/laipeng668/packages net/ariang
-    git_sparse_clone frp https://github.com/laipeng668/packages net/frp
+# 添加基础第三方包
+add_basic_packages() {
+    log_info "添加基础第三方包..."
+    
+    # Go语言支持
+    git clone --depth=1 "$GOLANG_REPO" feeds/packages/lang/golang
+    
+    # OpenList
+    git clone --depth=1 "$OPENLIST_REPO" package/openlist
+    
+    # ariang
+    git_sparse_clone ariang "$LAIPENG_PACKAGES_REPO" net/ariang
+    
+    # frp
+    git_sparse_clone frp "$LAIPENG_PACKAGES_REPO" net/frp
     mv -f package/frp feeds/packages/net/frp
-    git_sparse_clone frp https://github.com/laipeng668/luci applications/luci-app-frpc applications/luci-app-frps
+    
+    # frpc/frps
+    git_sparse_clone frp "$LAIPENG_LUCI_REPO" applications/luci-app-frpc applications/luci-app-frps
     mv -f package/luci-app-frpc feeds/luci/applications/luci-app-frpc
     mv -f package/luci-app-frps feeds/luci/applications/luci-app-frps
-    git_sparse_clone main https://github.com/VIKINGYFY/packages luci-app-wolplus
-    git clone --depth=1 https://github.com/lwb1978/openwrt-gecoosac package/openwrt-gecoosac
-    git clone --depth=1 https://github.com/NONGFAH/luci-app-athena-led package/luci-app-athena-led
+    
+    # WolPlus
+    git_sparse_clone main "$VIKINGYFY_PACKAGES_REPO" luci-app-wolplus
+    
+    # GecoosAC
+    git clone --depth=1 "$GECOOSAC_REPO" package/openwrt-gecoosac
+    
+    # Athena LED
+    git clone --depth=1 "$ATHENA_LED_REPO" package/luci-app-athena-led
     chmod +x package/luci-app-athena-led/root/etc/init.d/athena_led package/luci-app-athena-led/root/usr/sbin/athena-led
+}
 
-    # Mary定制包
+# 添加Mary定制包
+add_mary_packages() {
     log_info "添加Mary定制包..."
-    MARY_PACKAGES=(
-        "https://github.com/sirpdboy/luci-app-netspeedtest:package/netspeedtest"
-        "https://github.com/sirpdboy/luci-app-partexp:package/luci-app-partexp"
-        "https://github.com/sirpdboy/luci-app-taskplan:package/luci-app-taskplan"
-        "https://github.com/tailscale/tailscale:package/tailscale"
-        "https://github.com/gdy666/luci-app-lucky:package/luci-app-lucky"
-        "https://github.com/destan19/OpenAppFilter.git:package/OpenAppFilter"
-        "https://github.com/nikkinikki-org/OpenWrt-momo:package/luci-app-momo"
-        "https://github.com/nikkinikki-org/OpenWrt-nikki:package/nikki"
-        "https://github.com/vernesong/OpenClash:package/OpenClash"
-    )
-
     for package_url in "${MARY_PACKAGES[@]}"; do
-        url="${package_url%:*}"
-        target="${package_url#*:}"
+        local url="${package_url%:*}"
+        local target="${package_url#*:}"
         log_info "克隆 $url 到 $target"
         git clone --depth=1 "$url" "$target"
     done
+}
 
-    # 添加kenzok8软件源
+# 添加kenzok8软件源
+add_kenzok8_source() {
     log_info "添加kenzok8软件源..."
-    git clone --depth=1 https://github.com/kenzok8/small-package small8 
+    git clone --depth=1 "$KENZOK8_SMALL_REPO" small8 
+}
 
-    # 更新和安装Feeds
+# 更新和安装Feeds
+update_feeds() {
     log_info "更新和安装Feeds..."
     ./scripts/feeds update -a
     ./scripts/feeds install -a
+}
+
+# 执行实际的DIY操作
+execute_diy() {
+    log_info "开始执行DIY操作..."
+    
+    modify_default_config
+    remove_packages
+    add_basic_packages
+    add_mary_packages
+    add_kenzok8_source
+    update_feeds
     
     log_success "DIY操作完成"
 }
 
-# --- 主逻辑 ---
-COMMAND=${1:-all}
+# ==================== 主逻辑 ====================
+# 显示帮助信息
+show_help() {
+    echo "OpenWrt DIY 脚本"
+    echo ""
+    echo "用法: $0 [命令]"
+    echo ""
+    echo "可用命令:"
+    echo "  pre-feeds     执行第一阶段操作 (在 feeds update 之前)"
+    echo "  post-feeds    执行第二阶段操作和DIY (在 feeds install 之后)"
+    echo "  all           执行所有操作 (默认)"
+    echo "  help          显示此帮助信息"
+    echo ""
+    echo "示例:"
+    echo "  $0 pre-feeds"
+    echo "  $0 post-feeds"
+    echo "  $0 all"
+}
+
+# 处理命令
+COMMAND="${1:-all}"
 
 case "$COMMAND" in
     pre-feeds)
@@ -168,9 +195,12 @@ case "$COMMAND" in
         post_feeds
         execute_diy
         ;;
+    help|--help|-h)
+        show_help
+        ;;
     *)
         log_error "未知命令 '$COMMAND'"
-        echo "可用命令: pre-feeds, post-feeds, all"
+        echo "使用 '$0 help' 查看可用命令"
         exit 1
         ;;
 esac

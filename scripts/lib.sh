@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# OpenWrt 构建函数库
-# 只用于 source 加载，提供通用函数和变量
+# OpenWrt DIY 脚本
+# 用于处理 OpenWrt 构建过程中的自定义操作
 
 # 设置错误处理
 set -euo pipefail
@@ -289,3 +289,82 @@ git_sparse_clone() {
     # 清理临时目录
     cd - && rm -rf "$temp_dir"
 }
+
+# ==================== DIY 功能函数 ====================
+
+# pre-feeds 阶段：在更新feeds之前执行
+pre_feeds() {
+    log_info "执行 pre-feeds 阶段操作..."
+    
+    # 备份原始feeds配置
+    if [ -f "feeds.conf.default" ]; then
+        cp feeds.conf.default feeds.conf.default.backup
+        log_info "已备份原始feeds配置文件"
+    fi
+    
+    # 添加第三方feeds
+    cat >> feeds.conf.default << EOF
+
+# 第三方feeds
+src-git lienol https://github.com/Lienol/openwrt-package
+src-git small https://github.com/kenzok8/small
+EOF
+    
+    log_success "pre-feeds 阶段完成"
+}
+
+# post-feeds 阶段：在更新feeds之后执行
+post_feeds() {
+    log_info "执行 post-feeds 阶段操作..."
+    
+    # 这里可以添加feeds更新后的自定义操作
+    # 例如：修改某些软件包的配置
+    
+    log_success "post-feeds 阶段完成"
+}
+
+# ==================== 主程序 ====================
+main() {
+    local command="${1:-}"
+    
+    case "$command" in
+        "pre-feeds")
+            pre_feeds
+            ;;
+        "post-feeds")
+            post_feeds
+            ;;
+        "generate-notes")
+            if [ $# -lt 3 ]; then
+                log_error "用法: $0 generate-notes <manifest_file> <output_file>"
+                exit 1
+            fi
+            generate_release_notes "$2" "$3"
+            ;;
+        "get-devices")
+            if [ $# -lt 2 ]; then
+                log_error "用法: $0 get-devices <config_file>"
+                exit 1
+            fi
+            get_devices_from_config "$2"
+            ;;
+        "select-device")
+            if [ $# -lt 4 ]; then
+                log_error "用法: $0 select-device <config_file> <device_name> <chipset>"
+                exit 1
+            fi
+            select_device_config "$2" "$3" "$4"
+            ;;
+        "list-packages")
+            list_third_party_packages
+            ;;
+        *)
+            log_error "未知命令: $command"
+            log_error "可用命令: pre-feeds, post-feeds, generate-notes, get-devices, select-device, list-packages"
+            exit 1
+            ;;
+    esac
+}
+
+# 执行主程序
+main "$@"

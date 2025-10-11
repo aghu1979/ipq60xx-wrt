@@ -190,8 +190,8 @@ jobs:
             exit 1
           fi
           
-          # 使用 ::set-output 命令设置输出，确保格式正确
-          echo "::set-output name=matrix::$MATRIX"
+          # 使用环境文件设置输出，替代已弃用的 ::set-output
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
           echo "ubuntu=[\"${{ github.event.inputs.ubuntu_version || 'ubuntu-22.04' }}\"]" >> $GITHUB_OUTPUT
           echo "tag=${CHIPSET}-$(date '+%Y%m%d')" >> $GITHUB_OUTPUT
           log_success "矩阵和 Release Tag 生成完成。"
@@ -232,7 +232,7 @@ jobs:
         run: |
           source ${{ env.SCRIPT_LIB }}
           log_info "执行 DIY 脚本加载第三方源..."
-          ${{ env.SCRIPT_DIY }} pre-feeds
+          $GITHUB_WORKSPACE/${{ env.SCRIPT_DIY }} pre-feeds
 
       - name: 更新和安装 Feeds
         run: |
@@ -248,7 +248,7 @@ jobs:
           cd openwrt
           log_info "生成包含所有第三方包的配置..."
           echo "CONFIG_TARGET_${{ needs.generate-matrix.outputs.chipset }}=y" > .config
-          ${{ env.SCRIPT_BUILD_HELPER }} list-third-party-packages >> .config
+          $GITHUB_WORKSPACE/${{ env.SCRIPT_BUILD_HELPER }} list-third-party-packages >> .config
           make defconfig
 
       - name: 缓存第三方包
@@ -316,7 +316,7 @@ jobs:
         run: |
           source ${{ env.SCRIPT_LIB }}
           log_info "执行 DIY 脚本 (第一阶段)..."
-          ${{ env.SCRIPT_DIY }} pre-feeds
+          $GITHUB_WORKSPACE/${{ env.SCRIPT_DIY }} pre-feeds
 
       - name: 克隆源码
         run: |
@@ -337,14 +337,14 @@ jobs:
         run: |
           source ${{ env.SCRIPT_LIB }}
           log_info "执行 DIY 脚本 (第二阶段)..."
-          ${{ env.SCRIPT_DIY }} post-feeds
+          $GITHUB_WORKSPACE/${{ env.SCRIPT_DIY }} post-feeds
 
       - name: 合并配置
         run: |
           source ${{ env.SCRIPT_LIB }}
           cd openwrt
           log_info "合并配置文件..."
-          ${{ env.SCRIPT_BUILD_HELPER }} select-device .config ${{ matrix.device }} ${{ matrix.chipset }}
+          $GITHUB_WORKSPACE/${{ env.SCRIPT_BUILD_HELPER }} select-device .config ${{ matrix.device }} ${{ matrix.chipset }}
           ../scripts/kconfig.pl 'all' '+' "../configs/${{ matrix.chipset }}.base.config" '+' "../configs/${{ matrix.repo_name }}.config" '+' "../configs/${{ matrix.profile }}.config" > .config
           make defconfig
           log_success "配置合并完成。"
@@ -430,7 +430,7 @@ jobs:
           source ${{ env.SCRIPT_LIB }}
           log_info "正在创建 Release: $TAG"
           MANIFEST_FILE=$(find artifacts -name 'manifest' | head -n 1)
-          ${{ env.SCRIPT_BUILD_HELPER }} generate-notes "$MANIFEST_FILE" release_notes.md
+          $GITHUB_WORKSPACE/${{ env.SCRIPT_BUILD_HELPER }} generate-notes "$MANIFEST_FILE" release_notes.md
           if gh release view "$TAG" > /dev/null 2>&1; then
             log_warning "Release $TAG 已存在，正在删除..."
             gh release delete "$TAG" --yes

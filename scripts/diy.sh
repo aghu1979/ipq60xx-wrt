@@ -112,10 +112,7 @@ add_basic_packages() {
         if [ -d "feeds/packages/lang/golang" ]; then
             log_info "已添加: golang"
         else
-            log_error "golang 克隆失败"
-        fi
-    else
-        log_info "golang 已存在，跳过"
+            log_info "golang 已存在，跳过"
     fi
     
     # OpenList
@@ -125,10 +122,7 @@ add_basic_packages() {
         if [ -d "package/openlist" ]; then
             log_info "已添加: openlist"
         else
-            log_error "openlist 克隆失败"
-        fi
-    else
-        log_info "openlist 已存在，跳过"
+            log_info "openlist 已存在，跳过"
     fi
     
     # ariang
@@ -138,10 +132,7 @@ add_basic_packages() {
         if [ -d "feeds/packages/net/ariang" ]; then
             log_info "已添加: ariang"
         else
-            log_error "ariang 稀疏克隆失败"
-        fi
-    else
-        log_info "ariang 已存在，跳过"
+            log_info "ariang 已存在，跳过"
     fi
     
     # frp
@@ -151,10 +142,7 @@ add_basic_packages() {
         if [ -d "feeds/packages/net/frp" ]; then
             log_info "已添加: frp"
         else
-            log_error "frp 稀疏克隆失败"
-        fi
-    else
-        log_info "frp 已存在，跳过"
+            log_info "frp 已存在，跳过"
     fi
     
     # frpc/frps
@@ -164,10 +152,7 @@ add_basic_packages() {
         if [ -d "feeds/luci/applications/luci-app-frpc" ]; then
             log_info "已添加: frpc/frps"
         else
-            log_error "frpc/frps 稀疏克隆失败"
-        fi
-    else
-        log_info "frpc/frps 已存在，跳过"
+            log_info "frpc/frps 已存在，跳过"
     fi
     
     # WolPlus
@@ -177,10 +162,7 @@ add_basic_packages() {
         if [ -d "package/luci-app-wolplus" ]; then
             log_info "已添加: wolplus"
         else
-            log_error "wolplus 稀疏克隆失败"
-        fi
-    else
-        log_info "wolplus 已存在，跳过"
+            log_info "wolplus 已存在，跳过"
     fi
     
     # GecoosAC
@@ -190,10 +172,7 @@ add_basic_packages() {
         if [ -d "package/openwrt-gecoosac" ]; then
             log_info "已添加: gecoosac"
         else
-            log_error "gecoosac 克隆失败"
-        fi
-    else
-        log_info "gecoosac 已存在，跳过"
+            log_info "gecoosac 已存在，跳过"
     fi
     
     # Athena LED
@@ -204,11 +183,8 @@ add_basic_packages() {
             chmod +x package/luci-app-athena-led/root/etc/init.d/athena_led package/luci-app-athena-led/root/usr/sbin/athena-led
             log_info "已添加: athena-led"
         else
-            log_error "athena-led 克隆失败"
+            log_info "athena-led 已存在，跳过"
         fi
-    else
-        log_info "athena-led 已存在，跳过"
-    fi
 }
 
 # 添加Mary定制包
@@ -241,10 +217,7 @@ add_kenzok8_source() {
         if [ -d "small8" ]; then
             log_info "已添加: kenzok8 small-package"
         else
-            log_error "kenzok8 small-package 克隆失败"
-        fi
-    else
-        log_info "kenzok8 small-package 已存在，跳过"
+            log_info "kenzok8 small-package 已存在，跳过"
     fi
 }
 
@@ -270,7 +243,7 @@ update_feeds() {
     log_info "安装feeds..."
     ./scripts/feeds install -a
     
-    log_success "Feeds更新和安装完成"
+    log_success "Feeds更新和安装完成。"
 }
 
 # 执行实际的DIY操作

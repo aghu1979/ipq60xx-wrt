@@ -234,16 +234,65 @@ jobs:
           log_info "执行 DIY 脚本加载第三方源..."
           $GITHUB_WORKSPACE/${{ env.SCRIPT_DIY }} pre-feeds
 
+      - name: 诊断Feeds配置
+        run: |
+          source ${{ env.SCRIPT_LIB }}
+          cd openwrt
+          log_info "=== 诊断Feeds配置 ==="
+          
+          # 检查feeds.conf.default
+          if [ -f "feeds.conf.default" ]; then
+            log_info "feeds.conf.default内容:"
+            cat feeds.conf.default
+          else
+            log_error "feeds.conf.default不存在"
+          fi
+          
+          # 检查是否有备份
+          if [ -f "feeds.conf.default.backup" ]; then
+            log_info "发现备份文件，内容:"
+            cat feeds.conf.default.backup
+          fi
+
       - name: 更新和安装 Feeds
         run: |
           source ${{ env.SCRIPT_LIB }}
           cd openwrt
           log_info "更新和安装 Feeds..."
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
           
-          # 检查feeds安装结果
-          log_info "=== Feeds安装后检查 ==="
+          # 检查当前工作目录
+          log_info "当前工作目录: $(pwd)"
+          log_info "当前目录内容:"
+          ls -la
+          
+          # 检查feeds配置文件
+          log_info "=== 检查feeds配置 ==="
+          if [ -f "feeds.conf.default" ]; then
+            log_info "feeds.conf.default内容:"
+            cat feeds.conf.default
+          else
+            log_error "feeds.conf.default不存在"
+          fi
+          
+          # 尝试更新单个feed以获取更多信息
+          log_info "=== 尝试更新单个feed ==="
+          ./scripts/feeds update packages
+          log_info "packages feed更新完成"
+          
+          # 检查packages目录
+          if [ -d "feeds/packages" ]; then
+            log_info "feeds/packages目录内容:"
+            ls -la feeds/packages/ | head -10
+          else
+            log_error "feeds/packages目录不存在"
+          fi
+          
+          # 更新所有feeds
+          log_info "=== 更新所有feeds ==="
+          ./scripts/feeds update -a
+          
+          # 检查feeds更新结果
+          log_info "=== Feeds更新后检查 ==="
           if [ -d "package/feeds" ]; then
             log_info "package/feeds目录内容:"
             ls -la package/feeds/
@@ -261,28 +310,19 @@ jobs:
           else
             log_error "package/feeds目录不存在"
           fi
-
-      - name: 调试Feeds安装
-        run: |
-          source ${{ env.SCRIPT_LIB }}
-          cd openwrt
-          log_info "=== 调试Feeds安装情况 ==="
           
-          # 检查feeds.conf.default
-          if [ -f "feeds.conf.default" ]; then
-            log_info "feeds.conf.default内容:"
-            cat feeds.conf.default
-          else
-            log_error "feeds.conf.default文件不存在"
-          fi
+          # 安装feeds
+          log_info "=== 安装feeds ==="
+          ./scripts/feeds install -a
           
-          # 检查package/feeds目录
+          # 再次检查
+          log_info "=== Feeds安装后最终检查 ==="
           if [ -d "package/feeds" ]; then
-            log_info "package/feeds目录存在，内容:"
+            log_info "最终package/feeds目录内容:"
             ls -la package/feeds/
             
             # 统计各类型包的数量
-            log_info "=== 包统计 ==="
+            log_info "=== 最终包统计 ==="
             for feed_dir in package/feeds/*/; do
               if [ -d "$feed_dir" ]; then
                 feed_name=$(basename "$feed_dir")
@@ -292,7 +332,38 @@ jobs:
               fi
             done
           else
-            log_error "package/feeds目录不存在"
+            log_error "最终package/feeds目录仍然不存在"
+          fi
+
+      - name: 网络诊断
+        if: failure()
+        run: |
+          source ${{ env.SCRIPT_LIB }}
+          cd openwrt
+          log_info "=== 网络诊断 ==="
+          
+          # 测试网络连接
+          log_info "测试网络连接..."
+          curl -I https://git.openwrt.org/feed/packages.git || log_error "无法访问OpenWrt packages feed"
+          curl -I https://git.openwrt.org/project/luci.git || log_error "无法访问OpenWrt luci feed"
+          
+          # 测试DNS解析
+          log_info "测试DNS解析..."
+          nslookup git.openwrt.org || log_error "DNS解析失败"
+          
+          # 检查git配置
+          log_info "检查git配置..."
+          git config --list
+          
+          # 尝试手动克隆一个小仓库
+          log_info "尝试手动克隆测试..."
+          cd /tmp
+          git clone --depth=1 https://git.openwrt.org/feed/packages.git test-clone
+          if [ -d "test-clone" ]; then
+            log_info "手动克隆成功，网络正常"
+            rm -rf test-clone
+          else
+            log_error "手动克隆失败，网络可能有问题"
           fi
 
       - name: 生成第三方包配置
@@ -344,7 +415,7 @@ jobs:
         with:
           path: |
             /workdir/openwrt/dl
-            /workdir/openwrt/build_dir
+            - /workdir/openwrt/build_dir
             /workdir/openwrt/staging_dir
             /workdir/openwrt/bin/packages
           key: third-party-${{ needs.generate-matrix.outputs.chipset }}-${{ runner.os }}-$(sha256sum ${{ env.SCRIPT_DIY }} | cut -d' ' -f1)
@@ -419,26 +490,6 @@ jobs:
           log_info "更新和安装 Feeds..."
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          
-          # 检查feeds安装结果
-          log_info "=== Feeds安装后检查 ==="
-          if [ -d "package/feeds" ]; then
-            log_info "package/feeds目录内容:"
-            ls -la package/feeds/
-            
-            # 统计各类型包的数量
-            log_info "=== 包统计 ==="
-            for feed_dir in package/feeds/*/; do
-              if [ -d "$feed_dir" ]; then
-                feed_name=$(basename "$feed_dir")
-                package_count=$(find "$feed_dir" -name "Makefile" | wc -l)
-                luci_count=$(find "$feed_dir" -name "luci-app-*" -type d | wc -l)
-                log_info "$feed_name: 总包数=$package_count, luci-app数量=$luci_count"
-              fi
-            done
-          else
-            log_error "package/feeds目录不存在"
-          fi
 
       - name: 执行 DIY (第二阶段)
         run: |

@@ -25,7 +25,7 @@ env:
 
 jobs:
   build:
-    name: 编译: ${{ matrix.repo_short }}
+    name: "编译: ${{ matrix.repo_short }}"
     runs-on: ${{ github.event.inputs.runner || 'ubuntu-22.04' }}
     strategy:
       matrix:

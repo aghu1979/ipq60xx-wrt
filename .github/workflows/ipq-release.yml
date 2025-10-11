@@ -242,14 +242,81 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
+      - name: 调试Feeds安装
+        run: |
+          source ${{ env.SCRIPT_LIB }}
+          cd openwrt
+          log_info "=== 调试Feeds安装情况 ==="
+          
+          # 检查feeds.conf.default
+          if [ -f "feeds.conf.default" ]; then
+            log_info "feeds.conf.default内容:"
+            cat feeds.conf.default
+          else
+            log_error "feeds.conf.default文件不存在"
+          fi
+          
+          # 检查package/feeds目录
+          if [ -d "package/feeds" ]; then
+            log_info "package/feeds目录存在，内容:"
+            ls -la package/feeds/
+            
+            # 统计各类型包的数量
+            log_info "=== 包统计 ==="
+            for feed_dir in package/feeds/*/; do
+              if [ -d "$feed_dir" ]; then
+                feed_name=$(basename "$feed_dir")
+                package_count=$(find "$feed_dir" -name "Makefile" | wc -l)
+                luci_count=$(find "$feed_dir" -name "luci-app-*" -type d | wc -l)
+                log_info "$feed_name: 总包数=$package_count, luci-app数量=$luci_count"
+              fi
+            done
+          else
+            log_error "package/feeds目录不存在"
+          fi
+
       - name: 生成第三方包配置
         run: |
           source ${{ env.SCRIPT_LIB }}
           cd openwrt
           log_info "生成包含所有第三方包的配置..."
           echo "CONFIG_TARGET_${{ needs.generate-matrix.outputs.chipset }}=y" > .config
-          $GITHUB_WORKSPACE/${{ env.SCRIPT_BUILD_HELPER }} list-third-party-packages >> .config
+          
+          # 调试：检查feeds目录
+          log_info "=== 调试Feeds目录 ==="
+          log_info "当前工作目录: $(pwd)"
+          log_info "package目录内容:"
+          ls -la package/ || log_warning "package目录不存在"
+          
+          if [ -d "package/feeds" ]; then
+            log_info "feeds目录内容:"
+            ls -la package/feeds/
+            log_info "所有feeds子目录:"
+            find package/feeds -type d | head -20
+            log_info "所有luci-app包:"
+            find package/feeds -name "luci-app-*" -type d
+          else
+            log_error "package/feeds目录不存在"
+          fi
+          
+          # 调用函数获取包列表
+          log_info "=== 调用list-third-party-packages函数 ==="
+          PACKAGES=$($GITHUB_WORKSPACE/${{ env.SCRIPT_BUILD_HELPER }} list-third-party-packages)
+          log_info "获取到的包列表: $PACKAGES"
+          
+          # 将包列表添加到配置
+          if [ -n "$PACKAGES" ]; then
+            echo "$PACKAGES" >> .config
+            log_info "已将第三方包添加到配置文件"
+          else
+            log_warning "没有找到第三方包，配置文件保持原样"
+          fi
+          
           make defconfig
+          
+          # 显示配置文件中的包配置
+          log_info "=== 配置文件中的包配置 ==="
+          grep "CONFIG_PACKAGE_luci-app" .config || log_warning "配置文件中没有luci-app包配置"
 
       - name: 缓存第三方包
         id: cache

@@ -7,7 +7,7 @@ on:
         description: '选择运行器（ubuntu-22.04 或 ubuntu-24.04）'
         required: false
         default: 'ubuntu-22.04'
-  # 定时触发：北京时间每周五 00:00（UTC 为前一天 16:00）
+  # 定时触发：北京时间每周五 00:00（对应 UTC 的前一日 16:00）
   schedule:
     - cron: '0 16 * * 4'
 
@@ -20,13 +20,13 @@ env:
   CONFIGS_DIR: configs
   ARTIFACT_DIR: artifacts
   LOG_DIR: logs
-  CACHE_VERSION: 'v1'  # 如需强制清理缓存可以改此字段
+  CACHE_VERSION: 'v1'
   BUILD_ORDER: "Ultra Max Pro"
 
 jobs:
   build:
     name: "编译: ${{ matrix.repo_short }}"
-    runs-on: ${{ github.event.inputs.runner || 'ubuntu-22.04' }}
+    runs-on: ${{ (github.event.inputs.runner != '' && github.event.inputs.runner) || 'ubuntu-22.04' }}
     strategy:
       matrix:
         include:
@@ -50,7 +50,7 @@ jobs:
         run: |
           echo "Runner: ${{ github.event.inputs.runner }}"
           echo "Repo: ${{ matrix.repo_short }}"
-          echo "Upstream: ${{ matrix.repo_url }} @ ${matrix.repo_branch}"
+          echo "Upstream: ${{ matrix.repo_url }} @ ${{ matrix.repo_branch }}"
 
       - name: Cache: dl
         uses: actions/cache@v4
@@ -119,7 +119,8 @@ jobs:
         id: release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.create_tag.outputs.tag_name || format('{0}-{1}', github.run_id, env.CHIP) }}
+          # 使用稳定的 tag 名称（用 run id 与芯片）
+          tag_name: ${{ format('{0}-{1}', github.run_id, env.CHIP) }}
           name: ${{ format('build-{0}-{1}', github.run_id, env.CHIP) }}
           files: |
             artifacts/**/*

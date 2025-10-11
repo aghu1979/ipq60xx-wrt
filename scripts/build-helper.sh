@@ -1,176 +1,83 @@
 #!/bin/bash
 
-# OpenWrt 构建超级辅助脚本
-# 用法:
-#   source scripts/build-helper.sh          # 加载日志函数到当前 shell
-#   ./scripts/build-helper.sh get-devices <config_file>
-#   ./scripts/build-helper.sh select-device <config_file> <device_name> <chipset>
-#   ./scripts/build-helper.sh generate-notes <manifest_file> <output_file>
-#   ./scripts/build-helper.sh list-third-party-packages
+# OpenWrt 构建辅助脚本
+# 用于直接执行，处理构建相关任务
 
+# 设置错误处理
 set -euo pipefail
 
-# ==================== 颜色和日志函数 ====================
-export COLOR_RED='\033[0;31m'
-export COLOR_GREEN='\033[0;32m'
-export COLOR_YELLOW='\033[1;33m'
-export COLOR_BLUE='\033[0;34m'
-export COLOR_PURPLE='\033[0;35m'
-export COLOR_CYAN='\033[0;36m'
-export COLOR_NC='\033[0m'
-
-# 设置日志文件
-export LOG_FILE=${LOG_FILE:-"build.log"}
-
-log_info() { echo -e "${COLOR_BLUE}[INFO]${COLOR_NC} $1" | tee -a "${LOG_FILE}"; }
-log_success() { echo -e "${COLOR_GREEN}[SUCCESS]${COLOR_NC} $1" | tee -a "${LOG_FILE}"; }
-log_warning() { echo -e "${COLOR_YELLOW}[WARNING]${COLOR_NC} $1" | tee -a "${LOG_FILE}"; }
-log_error() { echo -e "${COLOR_RED}[ERROR]${COLOR_NC} $1" | tee -a "${LOG_FILE}" >&2; }
-
-# ==================== 实用函数 ====================
-# 检查命令是否存在
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-# 检查文件是否存在且非空
-file_exists_and_not_empty() {
-    [ -f "$1" ] && [ -s "$1" ]
-}
-
-# 安全地移动文件或目录
-safe_move() {
-    local src="$1"
-    local dest="$2"
-    
-    if [ ! -e "$src" ]; then
-        log_error "源文件/目录不存在: $src"
-        return 1
-    fi
-    
-    if [ -e "$dest" ]; then
-        log_warning "目标文件/目录已存在，将被覆盖: $dest"
-        rm -rf "$dest"
-    fi
-    
-    mv "$src" "$dest"
-    log_info "已移动: $src -> $dest"
-}
+# 加载函数库
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # ==================== 主逻辑 ====================
-COMMAND=${1:-}
+# 显示帮助信息
+show_help() {
+    echo "OpenWrt 构建辅助脚本"
+    echo ""
+    echo "用法: $0 <命令> [参数...]"
+    echo ""
+    echo "可用命令:"
+    echo "  get-devices <config_file>     从配置文件提取设备列表"
+    echo "  select-device <config_file> <device_name> <chipset>  选择设备配置"
+    echo "  generate-notes <manifest_file> <output_file>  生成 Release Notes"
+    echo "  list-third-party-packages     列出第三方包"
+    echo "  help                          显示此帮助信息"
+    echo ""
+    echo "示例:"
+    echo "  $0 get-devices configs/ipq60xx.base.config"
+    echo "  $0 select-device .config ax6000 ipq60xx"
+    echo "  $0 generate-notes manifest release_notes.md"
+}
 
-if [[ -z "$COMMAND" ]]; then
-    return 0
+# 检查参数
+if [ $# -eq 0 ]; then
+    show_help
+    exit 1
 fi
+
+# 处理命令
+COMMAND="$1"
+shift
 
 case "$COMMAND" in
     get-devices)
-        CONFIG_FILE=${2:-"configs/ipq60xx.base.config"}
-        if [ ! -f "$CONFIG_FILE" ]; then
-            log_error "配置文件 $CONFIG_FILE 不存在！"
-            echo "[]"
+        if [ $# -eq 0 ]; then
+            log_error "缺少配置文件参数"
+            echo "用法: $0 get-devices <config_file>"
             exit 1
         fi
-        log_info "正在从 $CONFIG_FILE 提取设备名..."
-        DEVICES=$(grep "^CONFIG_TARGET_DEVICE.*_DEVICE=y" "$CONFIG_FILE" | sed -n 's/^CONFIG_TARGET_DEVICE_.*_\(.*\)_DEVICE=y$/\1/p')
-        if [ -z "$DEVICES" ]; then
-            log_warning "在 $CONFIG_FILE 中未找到任何设备"
-            echo "[]"
-            exit 0
-        fi
-        echo "$DEVICES" | jq -R . | jq -s .
+        get_devices_from_config "$1"
         ;;
-
+        
     select-device)
-        if [ "$#" -ne 4 ]; then 
-            log_error "select-device 参数错误。用法: select-device <config_file> <device_name> <chipset>"; 
-            exit 1; 
-        fi
-        CONFIG_FILE=$2
-        DEVICE_NAME=$3
-        CHIPSET=$4
-        
-        if [ ! -f "$CONFIG_FILE" ]; then
-            log_error "配置文件 $CONFIG_FILE 不存在！"
+        if [ $# -ne 2 ]; then
+            log_error "参数数量不正确"
+            echo "用法: $0 select-device <config_file> <device_name> <chipset>"
             exit 1
         fi
-        
-        log_info "正在为架构 $CHIPSET 选择设备: $DEVICE_NAME"
-        sed -i 's/^CONFIG_TARGET_DEVICE.*_DEVICE=y/# & is not set/' "$CONFIG_FILE"
-        sed -i "s/^# CONFIG_TARGET_DEVICE_${CHIPSET}_${DEVICE_NAME}_DEVICE is not set/CONFIG_TARGET_DEVICE_${CHIPSET}_${DEVICE_NAME}_DEVICE=y/" "$CONFIG_FILE"
-        log_success "设备选择完成。"
+        select_device_config "$1" "$2" "$3"
         ;;
-
+        
     generate-notes)
-        if [ "$#" -ne 3 ]; then 
-            log_error "generate-notes 参数错误。用法: generate-notes <manifest_file> <output_file>"; 
-            exit 1; 
-        fi
-        MANIFEST_FILE=$1
-        OUTPUT_FILE=$2
-        
-        if [ ! -f "$MANIFEST_FILE" ]; then 
-            log_error "Manifest 文件 $MANIFEST_FILE 不存在！"; 
-            exit 1; 
-        fi
-        
-        log_info "正在生成 Release Notes..."
-        LUCI_APPS=$(grep -o 'luci-app-[^"]*' "$MANIFEST_FILE" | sort -u | sed 's/^/- /' || true)
-        
-        # 获取环境变量
-        BRANCH_NAME=${BRANCH_NAME:-"unknown"}
-        CHIPSET_NAME=${CHIPSET_NAME:-"unknown"}
-        UBUNTU_VERSION=${UBUNTU_VERSION:-"unknown"}
-        
-        cat << EOF > "$OUTPUT_FILE"
-# 🚀 OpenWrt 固件发布
-
-本固件由 GitHub Actions 自动编译于 $(date '+%Y-%m-%d %H:%M:%S') (UTC+8)。
-
----
-
-## 📦 编译信息
-
-- **源码分支**: ${BRANCH_NAME}
-- **芯片架构**: ${CHIPSET_NAME}
-- **构建环境**: ${UBUNTU_VERSION}
-
----
-
-## ✨ 成功编译的 LuCI 应用
-
- ${LUCI_APPS}
-
----
-
-## 📁 文件说明
-
-每个附件的压缩包内包含固件、配置、清单和所有软件包。
-
----
-
-## ⚠️ 重要提示
-
-- 刷机前请务必备份。
-- 本固件未集成任何第三方软件源。
-
-Happy Hacking! 🎉
-EOF
-        log_success "Release Notes 生成于 $OUTPUT_FILE"
-        ;;
-    
-    list-third-party-packages)
-        if [ ! -d "package/feeds" ]; then
-            log_error "Feeds 目录不存在，请先运行 feeds install。"
+        if [ $# -ne 2 ]; then
+            log_error "参数数量不正确"
+            echo "用法: $0 generate-notes <manifest_file> <output_file>"
             exit 1
         fi
-        find package/feeds -mindepth 1 -maxdepth 2 -type d -name "luci-app-*" -printf 'CONFIG_PACKAGE_%p=m\n' | sed 's|package/feeds/[^/]*/||'
+        generate_release_notes "$1" "$2"
         ;;
-
+        
+    list-third-party-packages)
+        list_third_party_packages
+        ;;
+        
+    help|--help|-h)
+        show_help
+        ;;
+        
     *)
         log_error "未知命令 '$COMMAND'"
-        echo "可用命令: get-devices, select-device, generate-notes, list-third-party-packages"
+        echo "使用 '$0 help' 查看可用命令"
         exit 1
         ;;
 esac

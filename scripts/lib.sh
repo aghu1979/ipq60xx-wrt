@@ -109,8 +109,15 @@ select_device_config() {
     fi
     
     log_info "正在为架构 $chipset 选择设备: $device_name"
-    sed -i 's/^CONFIG_TARGET_DEVICE.*_DEVICE=y/# & is not set/' "$config_file"
-    sed -i "s/^# CONFIG_TARGET_DEVICE_${chipset}_${device_name}_DEVICE is not set/CONFIG_TARGET_DEVICE_${chipset}_${device_name}_DEVICE=y/" "$config_file"
+    
+    # 注释掉所有设备配置
+    sed -i 's/^CONFIG_TARGET(_DEVICE)\?_[a-zA-Z0-9_]\+_DEVICE_[a-zA-Z0-9_-]\+=y/# & is not set/' "$config_file"
+    
+    # 启用指定设备配置
+    # 匹配两种可能的格式
+    sed -i "s/^# CONFIG_TARGET(_DEVICE)\?_[a-zA-Z0-9_]\+_DEVICE_${device_name}=y/CONFIG_TARGET_DEVICE_${chipset}_${device_name}=y/" "$config_file"
+    sed -i "s/^# CONFIG_TARGET(_DEVICE)\?_[a-zA-Z0-9_]\+_DEVICE_${device_name}=y/CONFIG_TARGET_${chipset}_${device_name}=y/" "$config_file"
+    
     log_success "设备选择完成。"
 }
 

@@ -184,11 +184,30 @@ EOF
 
 # 列出第三方包
 list_third_party_packages() {
+    log_info "检查 package/feeds 目录..." >&2
     if [ ! -d "package/feeds" ]; then
-        log_error "Feeds 目录不存在，请先运行 feeds install。"
+        log_error "Feeds 目录不存在，请先运行 feeds install。" >&2
         return 1
     fi
-    find package/feeds -mindepth 1 -maxdepth 2 -type d -name "luci-app-*" -printf 'CONFIG_PACKAGE_%p=m\n' | sed 's|package/feeds/[^/]*/||'
+    
+    log_info "列出 package/feeds 目录内容:" >&2
+    ls -la package/feeds/ >&2
+    
+    log_info "查找所有 luci-app-* 目录:" >&2
+    find package/feeds -name "luci-app-*" -type d >&2
+    
+    log_info "提取第三方包配置:" >&2
+    local packages
+    packages=$(find package/feeds -mindepth 1 -maxdepth 2 -type d -name "luci-app-*" -printf 'CONFIG_PACKAGE_%p=m\n' | sed 's|package/feeds/[^/]*/||' 2>/dev/null)
+    
+    if [ -z "$packages" ]; then
+        log_warning "未找到任何第三方包" >&2
+    else
+        log_info "找到的第三方包:" >&2
+        echo "$packages" >&2
+    fi
+    
+    echo "$packages"
 }
 
 # Git稀疏克隆函数

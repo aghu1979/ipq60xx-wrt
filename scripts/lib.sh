@@ -140,42 +140,65 @@ generate_release_notes() {
     local luci_apps
     luci_apps=$(grep -o 'luci-app-[^"]*' "$manifest_file" | sort -u | sed 's/^/- /' || true)
     
-    # 获取环境变量
-    local branch_name="${BRANCH_NAME:-unknown}"
-    local chipset_name="${CHIPSET_NAME:-unknown}"
-    local ubuntu_version="${UBUNTU_VERSION:-unknown}"
+    # 获取环境变量，设置默认值
+    local branch_name="${BRANCH_NAME:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')}"
+    local chipset_name="${CHIPSET_NAME:-'${{ github.event.inputs.chipset || 'unknown'}}"
+    local ubuntu_version="${UBUNTU_VERSION:-'${{ runner.os || 'unknown'}}"
+    local build_date="$(date '+%Y-%m-%d %H:%M:%S') (UTC+8)"
     
     cat << EOF > "$output_file"
 # 🚀 OpenWrt 固件发布
 
-本固件由 GitHub Actions 自动编译于 $(date '+%Y-%m-%d %H:%M:%S') (UTC+8)。
+本固件由 GitHub Actions 自动编译于 $build_date。
 
 ---
 
 ## 📦 编译信息
 
-- **源码分支**: ${branch_name}
-- **芯片架构**: ${chipset_name}
-- **构建环境**: ${ubuntu_version}
+- **源码分支**: $branch_name
+- **芯片架构**: $chipset_name
+- **构建环境**: $ubuntu_version
 
 ---
 
-## ✨ 成功编译的 LuCI 应用
+## ✨� 成功编译的 LuCI 应用
 
- ${luci_apps}
+ $luci_apps
 
 ---
 
 ## 📁 文件说明
 
-每个附件的压缩包内包含固件、配置、清单和所有软件包。
+每个附件的压缩包内包含：
+- 固件文件 (.bin 文件)
+- 配置文件 (.config)
+- 构建信息 (config.buildinfo)
+- 软件清单 (manifest)
+- 构建日志 (build-*.log)
+- 所有软件包 (packages.tar.gz)
 
 ---
 
 ## ⚠️ 重要提示
 
-- 刷机前请务必备份。
-- 本固件未集成任何第三方软件源。
+- 刷机前请务必备份重要数据
+- 本固件已集成以下第三方应用：
+  - OpenClash
+  - Tailscale
+  - Lucky
+  - Athena LED控制
+  - 网络速度测试
+  - 分区扩展
+  - 任务计划
+  - 更多...
+
+---
+
+## 🔧️ 编译信息
+
+- **构建ID**: ${{ github.run_id }}
+- **提交哈希**: ${{ github.sha }}
+- **构建时间**: $build_date
 
 Happy Hacking! 🎉
 EOF

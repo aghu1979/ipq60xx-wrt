@@ -19,10 +19,43 @@ export COLOR_PURPLE='\033[0;35m'
 export COLOR_CYAN='\033[0;36m'
 export COLOR_NC='\033[0m'
 
-log_info() { echo -e "${COLOR_BLUE}[INFO]${COLOR_NC} $1" | tee -a "${LOG_FILE:-/dev/null}"; }
-log_success() { echo -e "${COLOR_GREEN}[SUCCESS]${COLOR_NC} $1" | tee -a "${LOG_FILE:-/dev/null}"; }
-log_warning() { echo -e "${COLOR_YELLOW}[WARNING]${COLOR_NC} $1" | tee -a "${LOG_FILE:-/dev/null}"; }
-log_error() { echo -e "${COLOR_RED}[ERROR]${COLOR_NC} $1" | tee -a "${LOG_FILE:-/dev/null}" >&2; }
+# 设置日志文件
+export LOG_FILE=${LOG_FILE:-"build.log"}
+
+log_info() { echo -e "${COLOR_BLUE}[INFO]${COLOR_NC} $1" | tee -a "${LOG_FILE}"; }
+log_success() { echo -e "${COLOR_GREEN}[SUCCESS]${COLOR_NC} $1" | tee -a "${LOG_FILE}"; }
+log_warning() { echo -e "${COLOR_YELLOW}[WARNING]${COLOR_NC} $1" | tee -a "${LOG_FILE}"; }
+log_error() { echo -e "${COLOR_RED}[ERROR]${COLOR_NC} $1" | tee -a "${LOG_FILE}" >&2; }
+
+# ==================== 实用函数 ====================
+# 检查命令是否存在
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# 检查文件是否存在且非空
+file_exists_and_not_empty() {
+    [ -f "$1" ] && [ -s "$1" ]
+}
+
+# 安全地移动文件或目录
+safe_move() {
+    local src="$1"
+    local dest="$2"
+    
+    if [ ! -e "$src" ]; then
+        log_error "源文件/目录不存在: $src"
+        return 1
+    fi
+    
+    if [ -e "$dest" ]; then
+        log_warning "目标文件/目录已存在，将被覆盖: $dest"
+        rm -rf "$dest"
+    fi
+    
+    mv "$src" "$dest"
+    log_info "已移动: $src -> $dest"
+}
 
 # ==================== 主逻辑 ====================
 COMMAND=${1:-}
@@ -50,10 +83,19 @@ case "$COMMAND" in
         ;;
 
     select-device)
-        if [ "$#" -ne 4 ]; then log_error "select-device 参数错误。"; exit 1; fi
+        if [ "$#" -ne 4 ]; then 
+            log_error "select-device 参数错误。用法: select-device <config_file> <device_name> <chipset>"; 
+            exit 1; 
+        fi
         CONFIG_FILE=$2
         DEVICE_NAME=$3
         CHIPSET=$4
+        
+        if [ ! -f "$CONFIG_FILE" ]; then
+            log_error "配置文件 $CONFIG_FILE 不存在！"
+            exit 1
+        fi
+        
         log_info "正在为架构 $CHIPSET 选择设备: $DEVICE_NAME"
         sed -i 's/^CONFIG_TARGET_DEVICE.*_DEVICE=y/# & is not set/' "$CONFIG_FILE"
         sed -i "s/^# CONFIG_TARGET_DEVICE_${CHIPSET}_${DEVICE_NAME}_DEVICE is not set/CONFIG_TARGET_DEVICE_${CHIPSET}_${DEVICE_NAME}_DEVICE=y/" "$CONFIG_FILE"
@@ -61,30 +103,44 @@ case "$COMMAND" in
         ;;
 
     generate-notes)
-        if [ "$#" -ne 3 ]; then log_error "generate-notes 参数错误。"; exit 1; fi
+        if [ "$#" -ne 3 ]; then 
+            log_error "generate-notes 参数错误。用法: generate-notes <manifest_file> <output_file>"; 
+            exit 1; 
+        fi
         MANIFEST_FILE=$1
         OUTPUT_FILE=$2
-        if [ ! -f "$MANIFEST_FILE" ]; then log_error "Manifest 文件 $MANIFEST_FILE 不存在！"; exit 1; fi
+        
+        if [ ! -f "$MANIFEST_FILE" ]; then 
+            log_error "Manifest 文件 $MANIFEST_FILE 不存在！"; 
+            exit 1; 
+        fi
+        
         log_info "正在生成 Release Notes..."
         LUCI_APPS=$(grep -o 'luci-app-[^"]*' "$MANIFEST_FILE" | sort -u | sed 's/^/- /' || true)
+        
+        # 获取环境变量
+        BRANCH_NAME=${BRANCH_NAME:-"unknown"}
+        CHIPSET_NAME=${CHIPSET_NAME:-"unknown"}
+        UBUNTU_VERSION=${UBUNTU_VERSION:-"unknown"}
+        
         cat << EOF > "$OUTPUT_FILE"
 # 🚀 OpenWrt 固件发布
 
-本固件由 GitHub Actions 自动编译于 \$(date '+%Y-%m-%d %H:%M:%S') (UTC+8)。
+本固件由 GitHub Actions 自动编译于 $(date '+%Y-%m-%d %H:%M:%S') (UTC+8)。
 
 ---
 
 ## 📦 编译信息
 
-- **源码分支**: \${BRANCH_NAME}
-- **芯片架构**: \${CHIPSET_NAME}
-- **构建环境**: \${UBUNTU_VERSION}
+- **源码分支**: ${BRANCH_NAME}
+- **芯片架构**: ${CHIPSET_NAME}
+- **构建环境**: ${UBUNTU_VERSION}
 
 ---
 
 ## ✨ 成功编译的 LuCI 应用
 
- $($LUCI_APPS)
+ ${LUCI_APPS}
 
 ---
 

@@ -167,8 +167,6 @@ extract_kernel_version() {
   # try manifest
   local mf=$(find "$basedir" -maxdepth 2 -type f -name '*.manifest' | head -n1 || true)
   if [ -n "$mf" ]; then
-    # 试着解析常见的关键字
-    grep -E 'Linux|kernel|KERNEL|Kernel' "$mf" -m1 -n >/dev/null 2>&1 || true
     kv=$(grep -E 'Linux|kernel|KERNEL|Kernel' "$mf" | head -n1 || true)
     if [ -n "$kv" ]; then
       echo "$kv" | tr -d '\r\n'
@@ -187,7 +185,7 @@ extract_kernel_version() {
   echo ""
 }
 
-# 构建并收集产物
+# 构建并收集产物（在 UPSTREAM_DIR 下执行 make）
 build_device() {
   local cfg="$1"; local profile="$2"; local device="$3"
   log "开始构建 device=${device} profile=${profile}"
@@ -236,46 +234,63 @@ build_device() {
     find "$pkg_dir" -type f \( -name '*.ipk' -o -name '*.apk' \) -exec cp -f {} "$OUTPUT_DIR/${REPO_SHORT}/${profile}/${device}/app/" \;
   fi
 
-  # 生成 metadata.json
+  # 生成 metadata.json（使用 python3 可靠地生成 JSON）
   meta_dir="$OUTPUT_DIR/${REPO_SHORT}/${profile}/${device}"
   mkdir -p "$meta_dir"
-  kernel=$(extract_kernel_version "$UPSTREAM_DIR")
-  luci_list=$(extract_luci_apps "$cfg" | jq -R -s -c 'split("\n")[:-1]' 2>/dev/null || python3 - <<PY
-import sys, json
-s=sys.stdin.read().strip().splitlines()
-s=[x for x in s if x.strip()!='']
-print(json.dumps(s))
-PY <<EOF
-$(extract_luci_apps "$cfg" | sed 's/"/\\"/g')
-EOF
-)
-  # Fallback if previous failed: use simple comma separated list
-  if [ -z "$luci_list" ] || [ "$luci_list" = "null" ]; then
+  kernel=$(extract_kernel_version "$UPSTREAM_DIR" || true)
+
+  # luci_apps -> JSON array
+  luci_raw=$(extract_luci_apps "$cfg" || true)
+  if command -v python3 >/dev/null 2>&1; then
+    luci_list=$(printf '%s\n' "$luci_raw" | python3 -c "import sys,json; lines=[l.strip() for l in sys.stdin.read().splitlines() if l.strip()]; print(json.dumps(lines))")
+  else
     luci_list="[]"
   fi
 
-  # list artifacts
-  arts=$(find "$meta_dir" -type f -maxdepth 2 -printf "%P\n" 2>/dev/null | jq -R -s -c 'split("\n")[:-1]' 2>/dev/null || true)
-  if [ -z "$arts" ]; then
-    # fallback: minimal
-    arts="[]"
+  # artifacts list (files under meta_dir, relative path)
+  if command -v python3 >/dev/null 2>&1; then
+    ARTS=$(find "$meta_dir" -type f -maxdepth 2 -printf "%P\n" 2>/dev/null | python3 -c "import sys,json; lines=[l.strip() for l in sys.stdin.read().splitlines() if l.strip()]; print(json.dumps(lines))")
+  else
+    ARTS="[]"
   fi
 
-  cat > "$meta_dir/metadata.json" <<EOF
+  # write metadata.json using python to avoid quoting issues
+  meta_file="$meta_dir/metadata.json"
+  if command -v python3 >/dev/null 2>&1; then
+    export REPO_SHORT PROFILE device KERNEL LUCI_LIST ARTS
+    export REPO_SHORT="${REPO_SHORT}"
+    export PROFILE="${profile}"
+    export device="${device}"
+    export KERNEL="${kernel:-}"
+    export LUCI_LIST="${luci_list}"
+    export ARTS="${ARTS}"
+    python3 - <<PY
+import os, json
+meta = {
+  "repo_short": os.environ.get("REPO_SHORT",""),
+  "profile": os.environ.get("PROFILE",""),
+  "device": os.environ.get("device",""),
+  "kernel_version": os.environ.get("KERNEL",""),
+  "luci_apps": json.loads(os.environ.get("LUCI_LIST","[]")),
+  "artifacts": json.loads(os.environ.get("ARTS","[]"))
+}
+with open(r"${meta_file}", "w") as f:
+    json.dump(meta, f, indent=2, ensure_ascii=False)
+print("Wrote metadata:", "${meta_file}")
+PY
+  else
+    # fallback: minimal metadata
+    cat > "$meta_file" <<EOF
 {
   "repo_short": "${REPO_SHORT}",
   "profile": "${profile}",
   "device": "${device}",
-  "kernel_version": $(python3 - <<PY
-import json,sys
-k=${kernel!+repr(kernel) if kernel else "''"}
-print(json.dumps($kernel) if False else json.dumps("$kernel"))
-PY
-) ,
-  "luci_apps": ${luci_list},
-  "artifacts": ${arts}
+  "kernel_version": "${kernel}",
+  "luci_apps": [],
+  "artifacts": []
 }
 EOF
+  fi
 
   log "生成 metadata.json 在 $meta_dir/metadata.json"
   return 0

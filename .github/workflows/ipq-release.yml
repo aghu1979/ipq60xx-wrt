@@ -565,7 +565,7 @@ jobs:
           
           # 复制清单文件
           if [ -f "bin/targets/*/manifest" ]; then
-            cp bin/targets/*/manifest "$ARTIFACTACT_NAME/"
+            cp bin/targets/*/manifest "$ARTIFACT_NAME/"
             log_info "已添加清单文件"
           else
             log_warning "清单文件不存在"
@@ -623,7 +623,7 @@ EOF
     if: success() && needs.generate-matrix.outputs.release-tag != ''
     runs-on: ubuntu-latest
     steps:
-      - name: 检查出代码
+      - name: 检出代码
         uses: actions/checkout@v4
 
       - name: 设置脚本执行权限
@@ -645,7 +645,6 @@ EOF
           UBUNTU_VERSION: ${{ runner.os }}
         run: |
           source ${{ env.SCRIPT_LIB }}
-          cd openwrt
           
           log_info "正在创建 Release: $TAG"
           
@@ -714,86 +713,6 @@ EOF
             log_error "Release $TAG 不存在"
             exit 1
           fi
-
-  # 新增：更新构建状态徽章
-  update-build-status:
-    needs: [create-release]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 设置脚本执行权限
-        run: |
-          chmod +x scripts/*.sh
-          chmod +x configs/*.json
-
-      - name: 更新构建状态徽章
-        run: |
-          source ${{ env.SCRIPT_LIB }}
-          
-          # 根据构建结果设置徽章状态
-          if [ "${{ needs.create-release.result }}" == "success" ]; then
-            STATUS="passing"
-            COLOR="brightgreen"
-            MESSAGE="Build%20Success"
-          else
-            STATUS="failing"
-            COLOR="red"
-            MESSAGE="Build%20Failed"
-          fi
-          
-          # 更新README中的徽章
-          sed -i "s|https://img.shields.io/badge/build-.*-.*|https://img.shields.io/badge/build-${MESSAGE}-${COLOR}?style=flat-square|g" README.md
-          
-          # 提交更改
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add README.md
-          git diff --staged --quiet || git commit -m "Update build status badge [skip ci]"
-          git push
-
-  # 新增：记录构建统计
-  record-build-stats:
-    needs: [generate-matrix, build-firmware]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 设置脚本执行权限
-        run: |
-          chmod +x scripts/*.sh
-          chmod +x configs/*.json
-
-      - name: 记录构建统计
-        run: |
-          source ${{ env.SCRIPT_LIB }}
-          
-          # 创建或更新构建统计文件
-          STATS_FILE="build-stats.json"
-          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          CHIPSET="${{ needs.generate-matrix.outputs.chipset }}"
-          RESULT="${{ needs.build-firmware.result }}"
-          
-          # 如果文件不存在，创建空数组
-          if [ ! -f "$STATS_FILE" ]; then
-            echo "[]" > "$STATS_FILE"
-          fi
-          
-          # 添加新的构建记录
-          jq --arg timestamp "$TIMESTAMP" --arg chipset "$CHIPSET" --arg result "$RESULT" \
-            '. += [{timestamp: $timestamp, chipset: $chipset, result: $result}]' \
-            "$STATS_FILE" > tmp.json && mv tmp.json "$STATS_FILE"
-          
-          # 提交更改
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add "$STATS_FILE"
-          git diff --staged --quiet || git commit -m "Record build statistics [skip ci]"
-          git push
 
   # 新增：更新构建状态徽章
   update-build-status:

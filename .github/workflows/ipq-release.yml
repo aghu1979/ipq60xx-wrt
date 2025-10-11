@@ -10,13 +10,13 @@ on:
         required: true
         default: 'ipq60xx'
         type: choice
-        options: [ipq60xx]
+        options: [ipq60xx,]
       ubuntu_version:
         description: '选择 Ubuntu 版本'
         required: true
         default: 'ubuntu-22.04'
         type: choice
-        options: [ubuntu-22.04, ubuntu-24.04]
+        options: [ubuntu-24.04, ubuntu-22.04]
   # 北京时间周五0点自动编译 (UTC时间周四16点)
   schedule:
     - cron: '0 16 * * 4'
@@ -31,7 +31,8 @@ env:
   # --- 依赖和脚本 ---
   DEPENDS_SCRIPT_URL: 'git.io/depends-ubuntu-2204'
   SCRIPT_DIY: 'scripts/diy.sh'
-  SCRIPT_BUILD: 'scripts/build-helper.sh'
+  SCRIPT_BUILD_HELPER: 'scripts/build-helper.sh'
+  SCRIPT_LIB: 'scripts/lib.sh'
   TZ: Asia/Shanghai
 
 jobs:
@@ -48,13 +49,19 @@ jobs:
 
     - name: 设置脚本执行权限
       run: |
-        chmod +x scripts/*.sh
-        chmod +x configs/*.json
+        chmod +x ${{ env.SCRIPT_LIB }}
+        chmod +x ${{ env.SCRIPT_BUILD_HELPER }}
+        chmod +x ${{ env.SCRIPT_DIY }}
+        if [ -f "configs/repos.json" ]; then
+          chmod +x configs/repos.json
+        fi
 
     - name: 生成构建矩阵
       id: set-matrix
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        # 加载函数库
+        source ${{ env.SCRIPT_LIB }}
+        
         CHIPSET="${{ github.event.inputs.chipset || env.DEFAULT_CHIPSET }}"
         echo "chipset=$CHIPSET" >> $GITHUB_OUTPUT
         
@@ -66,7 +73,9 @@ jobs:
         
         REPOS_JSON=$(cat ${{ env.REPOS_CONFIG_FILE }})
         log_info "为芯片架构 $CHIPSET 生成设备矩阵..."
-        DEVICE_JSON=$(./${{ env.SCRIPT_BUILD }} get-devices "$BASE_CONFIG")
+        
+        # 使用build-helper脚本获取设备列表
+        DEVICE_JSON=$(${{ env.SCRIPT_BUILD_HELPER }} get-devices "$BASE_CONFIG")
         MATRIX=$(jq -n --argjson repos "$REPOS_JSON" --argjson devices "$DEVICE_JSON" --argjson profiles "$PROFILES" --arg chipset "$CHIPSET" '[$repos[] as $repo | $devices[] as $device | $profiles[] as $profile | {repo_name: $repo.name, repo_url: $repo.url, repo_branch: $repo.default_branch, chipset: $chipset, device: $device, profile: $profile}]')
         echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
         echo "ubuntu=[\"${{ github.event.inputs.ubuntu_version || 'ubuntu-24.04' }}\"]" >> $GITHUB_OUTPUT
@@ -84,14 +93,16 @@ jobs:
 
     - name: 设置脚本执行权限
       run: |
-        chmod +x scripts/*.sh
+        chmod +x ${{ env.SCRIPT_LIB }}
+        chmod +x ${{ env.SCRIPT_BUILD_HELPER }}
+        chmod +x ${{ env.SCRIPT_DIY }}
         if [ -f "configs/repos.json" ]; then
           chmod +x configs/repos.json
         fi
 
     - name: 初始化构建环境
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        source ${{ env.SCRIPT_LIB }}
         log_info "为第三方缓存初始化环境..."
         sudo -E apt-get -y update
         sudo -E apt-get -y install $(curl -fsSL ${{ env.DEPENDS_SCRIPT_URL }})
@@ -102,21 +113,20 @@ jobs:
 
     - name: 克隆基础源码
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        source ${{ env.SCRIPT_LIB }}
         log_info "克隆基础源码 (openwrt) 用于编译第三方包..."
         git clone https://github.com/openwrt/openwrt.git -b openwrt-23.05 /workdir/openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
     - name: 加载第三方 Feeds
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        source ${{ env.SCRIPT_LIB }}
         log_info "执行 DIY 脚本加载第三方源..."
-        chmod +x ${{ env.SCRIPT_DIY }}
         ${{ env.SCRIPT_DIY }} pre-feeds
 
     - name: 更新和安装 Feeds
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        source ${{ env.SCRIPT_LIB }}
         cd openwrt
         log_info "更新和安装 Feeds..."
         ./scripts/feeds update -a
@@ -124,11 +134,11 @@ jobs:
 
     - name: 生成第三方包配置
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        source ${{ env.SCRIPT_LIB }}
         cd openwrt
         log_info "生成包含所有第三方包的配置..."
         echo "CONFIG_TARGET_${{ needs.generate-matrix.outputs.chipset }}=y" > .config
-        ./${{ env.SCRIPT_BUILD }} list-third-party-packages >> .config
+        ${{ env.SCRIPT_BUILD_HELPER }} list-third-party-packages >> .config
         make defconfig
 
     - name: 缓存第三方包
@@ -147,7 +157,7 @@ jobs:
     - name: 编译第三方包
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        source ${{ env.SCRIPT_LIB }}
         cd openwrt
         log_info "开始编译所有第三方包...这可能需要很长时间。"
         make -j$(nproc) || make -j1 V=s
@@ -170,7 +180,9 @@ jobs:
 
     - name: 设置脚本执行权限
       run: |
-        chmod +x scripts/*.sh
+        chmod +x ${{ env.SCRIPT_LIB }}
+        chmod +x ${{ env.SCRIPT_BUILD_HELPER }}
+        chmod +x ${{ env.SCRIPT_DIY }}
         if [ -f "configs/repos.json" ]; then
           chmod +x configs/repos.json
         fi
@@ -185,7 +197,7 @@ jobs:
 
     - name: 初始化构建环境
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        source ${{ env.SCRIPT_LIB }}
         log_info "开始为 ${{ env.ARTIFACT_NAME }} 初始化环境..."
         sudo -E apt-get -y update
         sudo -E apt-get -y install $(curl -fsSL ${{ env.DEPENDS_SCRIPT_URL }})
@@ -196,21 +208,20 @@ jobs:
 
     - name: 执行 DIY (第一阶段)
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        source ${{ env.SCRIPT_LIB }}
         log_info "执行 DIY 脚本 (第一阶段)..."
-        chmod +x ${{ env.SCRIPT_DIY }}
         ${{ env.SCRIPT_DIY }} pre-feeds
 
     - name: 克隆源码
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        source ${{ env.SCRIPT_LIB }}
         log_info "克隆仓库 ${{ matrix.repo_name }} 的 ${{ matrix.repo_branch }} 分支..."
         git clone ${{ matrix.repo_url }} -b ${{ matrix.repo_branch }} /workdir/openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
     - name: 更新和安装 Feeds
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        source ${{ env.SCRIPT_LIB }}
         cd openwrt
         log_info "更新和安装 Feeds..."
         ./scripts/feeds update -a
@@ -218,16 +229,16 @@ jobs:
 
     - name: 执行 DIY (第二阶段)
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        source ${{ env.SCRIPT_LIB }}
         log_info "执行 DIY 脚本 (第二阶段)..."
         ${{ env.SCRIPT_DIY }} post-feeds
 
     - name: 合并配置
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        source ${{ env.SCRIPT_LIB }}
         cd openwrt
         log_info "合并配置文件..."
-        ../${{ env.SCRIPT_BUILD }} select-device .config ${{ matrix.device }} ${{ matrix.chipset }}
+        ${{ env.SCRIPT_BUILD_HELPER }} select-device .config ${{ matrix.device }} ${{ matrix.chipset }}
         ../scripts/kconfig.pl 'all' '+' "../configs/${{ matrix.chipset }}.base.config" '+' "../configs/${{ matrix.repo_name }}.config" '+' "../configs/${{ matrix.profile }}.config" > .config
         make defconfig
         log_success "配置合并完成。"
@@ -244,7 +255,7 @@ jobs:
 
     - name: 编译固件
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        source ${{ env.SCRIPT_LIB }}
         cd openwrt
         log_info "开始编译固件... (大部分第三方包已缓存，并启用 ccache 加速)"
         export CCACHE_DIR=~/.ccache
@@ -253,7 +264,7 @@ jobs:
 
     - name: 整理和打包产物
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        source ${{ env.SCRIPT_LIB }}
         log_info "整理产物..."
         mkdir -p "$ARTIFACT_NAME"
         echo '${{ env.FIRMWARE_TYPES }}' | jq -r '.[]' | while read type; do
@@ -296,7 +307,9 @@ jobs:
 
     - name: 设置脚本执行权限
       run: |
-        chmod +x scripts/*.sh
+        chmod +x ${{ env.SCRIPT_LIB }}
+        chmod +x ${{ env.SCRIPT_BUILD_HELPER }}
+        chmod +x ${{ env.SCRIPT_DIY }}
         if [ -f "configs/repos.json" ]; then
           chmod +x configs/repos.json
         fi
@@ -312,10 +325,10 @@ jobs:
         TAG: ${{ needs.generate-matrix.outputs.release-tag }}
         CHIPSET_NAME: ${{ github.event.inputs.chipset || env.DEFAULT_CHIPSET }}
       run: |
-        source ${{ env.SCRIPT_BUILD }}
+        source ${{ env.SCRIPT_LIB }}
         log_info "正在创建 Release: $TAG"
         MANIFEST_FILE=$(find artifacts -name 'manifest' | head -n 1)
-        ./${{ env.SCRIPT_BUILD }} generate-notes "$MANIFEST_FILE" release_notes.md
+        ${{ env.SCRIPT_BUILD_HELPER }} generate-notes "$MANIFEST_FILE" release_notes.md
         if gh release view "$TAG" > /dev/null 2>&1; then
           log_warning "Release $TAG 已存在，正在删除..."
           gh release delete "$TAG" --yes
@@ -335,13 +348,17 @@ jobs:
 
     - name: 设置脚本执行权限
       run: |
-        chmod +x scripts/*.sh
+        chmod +x ${{ env.SCRIPT_LIB }}
+        chmod +x ${{ env.SCRIPT_BUILD_HELPER }}
+        chmod +x ${{ env.SCRIPT_DIY }}
         if [ -f "configs/repos.json" ]; then
           chmod +x configs/repos.json
         fi
 
     - name: 更新构建状态徽章
       run: |
+        source ${{ env.SCRIPT_LIB }}
+        
         # 根据构建结果设置徽章状态
         if [ "${{ needs.create-release.result }}" == "success" ]; then
           STATUS="passing"
@@ -374,13 +391,17 @@ jobs:
 
     - name: 设置脚本执行权限
       run: |
-        chmod +x scripts/*.sh
+        chmod +x ${{ env.SCRIPT_LIB }}
+        chmod +x ${{ env.SCRIPT_BUILD_HELPER }}
+        chmod +x ${{ env.SCRIPT_DIY }}
         if [ -f "configs/repos.json" ]; then
           chmod +x configs/repos.json
         fi
 
     - name: 记录构建统计
       run: |
+        source ${{ env.SCRIPT_LIB }}
+        
         # 创建或更新构建统计文件
         STATS_FILE="build-stats.json"
         TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")

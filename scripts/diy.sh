@@ -51,8 +51,9 @@ readonly MARY_PACKAGES=(
 # 阶段1: 在 feeds update 之前执行
 pre_feeds() {
     log_info "执行 DIY: 加载第三方软件源..."
-    # 示例: 添加一个第三方 feed
-    # echo 'src-git custom_feed https://github.com/example/custom-feed.git' >> feeds.conf.default
+    # 添加自定义feeds到feeds.conf.default
+    echo "src-git custom_packages https://github.com/sbwml/packages_lang_golang.git;main" >> feeds.conf.default
+    echo "src-git custom_luci https://github.com/sbwml/luci-app-openlist2.git;main" >> feeds.conf.default
     log_success "第三方软件源加载完成。"
 }
 
@@ -94,32 +95,69 @@ add_basic_packages() {
     log_info "添加基础第三方包..."
     
     # Go语言支持
-    git clone --depth=1 "$GOLANG_REPO" feeds/packages/lang/golang
+    if [ ! -d "feeds/packages/lang/golang" ]; then
+        git clone --depth=1 "$GOLANG_REPO" feeds/packages/lang/golang
+        log_info "已添加: golang"
+    else
+        log_info "golang 已存在，跳过"
+    fi
     
     # OpenList
-    git clone --depth=1 "$OPENLIST_REPO" package/openlist
+    if [ ! -d "package/openlist" ]; then
+        git clone --depth=1 "$OPENLIST_REPO" package/openlist
+        log_info "已添加: openlist"
+    else
+        log_info "openlist 已存在，跳过"
+    fi
     
     # ariang
-    git_sparse_clone ariang "$LAIPENG_PACKAGES_REPO" net/ariang
+    if [ ! -d "feeds/packages/net/ariang" ]; then
+        git_sparse_clone ariang "$LAIPENG_PACKAGES_REPO" net/ariang
+        log_info "已添加: ariang"
+    else
+        log_info "ariang 已存在，跳过"
+    fi
     
     # frp
-    git_sparse_clone frp "$LAIPENG_PACKAGES_REPO" net/frp
-    mv -f package/frp feeds/packages/net/frp
+    if [ ! -d "feeds/packages/net/frp" ]; then
+        git_sparse_clone frp "$LAIPENG_PACKAGES_REPO" net/frp
+        log_info "已添加: frp"
+    else
+        log_info "frp 已存在，跳过"
+    fi
     
     # frpc/frps
-    git_sparse_clone frp "$LAIPENG_LUCI_REPO" applications/luci-app-frpc applications/luci-app-frps
-    mv -f package/luci-app-frpc feeds/luci/applications/luci-app-frpc
-    mv -f package/luci-app-frps feeds/luci/applications/luci-app-frps
+    if [ ! -d "feeds/luci/applications/luci-app-frpc" ]; then
+        git_sparse_clone frp "$LAIPENG_LUCI_REPO" applications/luci-app-frpc applications/luci-app-frps
+        log_info "已添加: frpc/frps"
+    else
+        log_info "frpc/frps 已存在，跳过"
+    fi
     
     # WolPlus
-    git_sparse_clone main "$VIKINGYFY_PACKAGES_REPO" luci-app-wolplus
+    if [ ! -d "package/luci-app-wolplus" ]; then
+        git_sparse_clone main "$VIKINGYFY_PACKAGES_REPO" luci-app-wolplus
+        log_info "已添加: wolplus"
+    else
+        log_info "wolplus 已存在，跳过"
+    fi
     
     # GecoosAC
-    git clone --depth=1 "$GECOOSAC_REPO" package/openwrt-gecoosac
+    if [ ! -d "package/openwrt-gecoosac" ]; then
+        git clone --depth=1 "$GECOOSAC_REPO" package/openwrt-gecoosac
+        log_info "已添加: gecoosac"
+    else
+        log_info "gecoosac 已存在，跳过"
+    fi
     
     # Athena LED
-    git clone --depth=1 "$ATHENA_LED_REPO" package/luci-app-athena-led
-    chmod +x package/luci-app-athena-led/root/etc/init.d/athena_led package/luci-app-athena-led/root/usr/sbin/athena-led
+    if [ ! -d "package/luci-app-athena-led" ]; then
+        git clone --depth=1 "$ATHENA_LED_REPO" package/luci-app-athena-led
+        chmod +x package/luci-app-athena-led/root/etc/init.d/athena_led package/luci-app-athena-led/root/usr/sbin/athena-led
+        log_info "已添加: athena-led"
+    else
+        log_info "athena-led 已存在，跳过"
+    fi
 }
 
 # 添加Mary定制包
@@ -128,15 +166,27 @@ add_mary_packages() {
     for package_url in "${MARY_PACKAGES[@]}"; do
         local url="${package_url%:*}"
         local target="${package_url#*:}"
-        log_info "克隆 $url 到 $target"
-        git clone --depth=1 "$url" "$target"
+        local package_name=$(basename "$target")
+        
+        if [ ! -d "$target" ]; then
+            log_info "克隆 $url 到 $target"
+            git clone --depth=1 "$url" "$target"
+            log_info "已添加: $package_name"
+        else
+            log_info "$package_name 已存在，跳过"
+        fi
     done
 }
 
 # 添加kenzok8软件源
 add_kenzok8_source() {
     log_info "添加kenzok8软件源..."
-    git clone --depth=1 "$KENZOK8_SMALL_REPO" small8 
+    if [ ! -d "small8" ]; then
+        git clone --depth=1 "$KENZOK8_SMALL_REPO" small8 
+        log_info "已添加: kenzok8 small-package"
+    else
+        log_info "kenzok8 small-package 已存在，跳过"
+    fi
 }
 
 # 更新和安装Feeds
@@ -155,7 +205,11 @@ execute_diy() {
     add_basic_packages
     add_mary_packages
     add_kenzok8_source
-    update_feeds
+    
+    # 重新更新feeds以包含新添加的包
+    log_info "重新更新feeds以包含新添加的包..."
+    ./scripts/feeds update -a
+    ./scripts/feeds install -a
     
     log_success "DIY操作完成"
 }

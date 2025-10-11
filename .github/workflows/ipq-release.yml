@@ -593,17 +593,14 @@ jobs:
           fi
           
           # 创建产物信息文件
-          cat << 'EOF' > "$ARTIFACT_NAME/info.txt"
-构建信息
-=========
-构建时间: $(date '+%Y-%m-%d %H:%M:%S')
-芯片架构: ${{ matrix.chipset }}
-设备型号: ${{ matrix.device }}
-配置文件: ${{ matrix.profile }}
-固件类型: $(echo '${{ env.FIRMWARE_TYPES }}' | jq -r '.[]' | tr '\n' ', ')
-构建ID: ${{ github.run_id }}
-提交哈希: ${{ github.sha }}
-EOF
+          printf "构建信息\n=========\n构建时间: %s\n芯片架构: %s\n设备型号: %s\n配置文件: %s\n固件类型: %s\n构建ID: %s\n提交哈希: %s\n" \
+            "$(date '+%Y-%m-%d %H:%M:%S')" \
+            "${{ matrix.chipset }}" \
+            "${{ matrix.device }}" \
+            "${{ matrix.profile }}" \
+            "$(echo '${{ env.FIRMWARE_TYPES }}' | jq -r '.[]' | tr '\n' ', ')" \
+            "${{ github.run_id }}" \
+            "${{ github.sha }}" > "$ARTIFACT_NAME/info.txt"
           
           # 列出所有文件大小
           log_info "=== 产物文件列表及大小 ==="

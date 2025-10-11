@@ -24,19 +24,23 @@ export LOG_FILE="${LOG_FILE:-$PROJECT_ROOT/build.log}"
 
 # ==================== 日志函数 ====================
 log_info() { 
-    echo -e "${COLOR_BLUE}[INFO]${COLOR_NC} $1" | tee -a "${LOG_FILE}" 
+    local message="$1"
+    echo -e "${COLOR_BLUE}[INFO]${COLOR_NC} $message" | tee -a "${LOG_FILE}" >&2
 }
 
 log_success() { 
-    echo -e "${COLOR_GREEN}[SUCCESS]${COLOR_NC} $1" | tee -a "${LOG_FILE}" 
+    local message="$1"
+    echo -e "${COLOR_GREEN}[SUCCESS]${COLOR_NC} $message" | tee -a "${LOG_FILE}" >&2
 }
 
 log_warning() { 
-    echo -e "${COLOR_YELLOW}[WARNING]${COLOR_NC} $1" | tee -a "${LOG_FILE}" 
+    local message="$1"
+    echo -e "${COLOR_YELLOW}[WARNING]${COLOR_NC} $message" | tee -a "${LOG_FILE}" >&2
 }
 
 log_error() { 
-    echo -e "${COLOR_RED}[ERROR]${COLOR_NC} $1" | tee -a "${LOG_FILE}" >&2 
+    local message="$1"
+    echo -e "${COLOR_RED}[ERROR]${COLOR_NC} $message" | tee -a "${LOG_FILE}" >&2
 }
 
 # ==================== 实用函数 ====================
@@ -86,6 +90,7 @@ get_devices_from_config() {
     local devices
     devices=$(grep -E "^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_[a-zA-Z0-9_-]+=y" "$config_file" | \
              sed -E 's/^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_([a-zA-Z0-9_-]+)=y$/\2/' | \
+             grep -v "^ROOTFS$" | \  # 过滤掉ROOTFS
              sort -u)
     
     if [ -z "$devices" ]; then

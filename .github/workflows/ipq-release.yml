@@ -593,7 +593,7 @@ jobs:
           fi
           
           # 创建产物信息文件
-          cat << EOF > "$ARTIFACT_NAME/info.txt"
+          cat << 'EOF' > "$ARTIFACT_NAME/info.txt"
 构建信息
 =========
 构建时间: $(date '+%Y-%m-%d %H:%M:%S')

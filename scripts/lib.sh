@@ -142,8 +142,8 @@ generate_release_notes() {
     
     # 获取环境变量，设置默认值
     local branch_name="${BRANCH_NAME:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')}"
-    local chipset_name="${CHIPSET_NAME:-'${{ github.event.inputs.chipset || 'unknown'}}"
-    local ubuntu_version="${UBUNTU_VERSION:-'${{ runner.os || 'unknown'}}"
+    local chipset_name="${CHIPSET_NAME:-${{ github.event.inputs.chipset || 'unknown' }}}"
+    local ubuntu_version="${UBUNTU_VERSION:-${{ runner.os || 'unknown' }}}"
     local build_date="$(date '+%Y-%m-%d %H:%M:%S') (UTC+8)"
     
     cat << EOF > "$output_file"
@@ -161,7 +161,7 @@ generate_release_notes() {
 
 ---
 
-## ✨� 成功编译的 LuCI 应用
+## ✨ 成功编译的 LuCI 应用
 
  $luci_apps
 

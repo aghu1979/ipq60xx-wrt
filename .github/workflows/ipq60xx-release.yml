@@ -21,114 +21,52 @@ env:
   ARTIFACT_DIR: artifacts
   LOG_DIR: logs
   CACHE_VERSION: 'v1'
-  # 如需改变构建顺序可调整此处
-  BUILD_ORDER: "Ultra Max Pro"
+  # 构建顺序：Ultra 优先
+  PROFILES: 'Ultra Max Pro'
 
 jobs:
-  # 并行构建 job：每个 matrix entry 是一个 repo/profile/device 的构建
+  # 预备任务：解析 configs，生成动态 matrix（JSON），输出为 job 输出 matrix
+  prepare:
+    name: '准备 matrix（解析 configs，生成 repo/profile/device 列表）'
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.make-matrix.outputs.matrix }}
+    steps:
+      - name: 'Checkout 仓库（包含 configs 与 scripts）'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: '准备环境'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq || true
+
+      - id: make-matrix
+        name: '生成 matrix JSON'
+        run: |
+          chmod +x ./scripts/prepare_matrix.sh || true
+          # 将生成的 JSON 放到 matrix.json
+          ./scripts/prepare_matrix.sh > matrix.json
+          echo "matrix file content:"
+          cat matrix.json
+          # 将 matrix.json 的内容写到 job output（支持多行）
+          echo "matrix<<EOF" >> $GITHUB_OUTPUT
+          cat matrix.json >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+  # 并行构建 job：由 prepare 输出动态 matrix 生成
   build:
     name: "构建: ${{ matrix.repo_short }} - ${{ matrix.profile }} - ${{ matrix.device }}"
+    needs: prepare
     runs-on: ${{ github.event.inputs.runner || 'ubuntu-22.04' }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # repo: immwrt
-          - repo_url: https://github.com/laipeng668/immortalwrt.git
-            repo_branch: master
-            repo_short: immwrt
-            profile: Ultra
-            device: jdcloud_re-ss-01
-          - repo_url: https://github.com/laipeng668/immortalwrt.git
-            repo_branch: master
-            repo_short: immwrt
-            profile: Ultra
-            device: jdcloud_re-cs-02
-          - repo_url: https://github.com/laipeng668/immortalwrt.git
-            repo_branch: master
-            repo_short: immwrt
-            profile: Max
-            device: jdcloud_re-ss-01
-          - repo_url: https://github.com/laipeng668/immortalwrt.git
-            repo_branch: master
-            repo_short: immwrt
-            profile: Max
-            device: jdcloud_re-cs-02
-          - repo_url: https://github.com/laipeng668/immortalwrt.git
-            repo_branch: master
-            repo_short: immwrt
-            profile: Pro
-            device: jdcloud_re-ss-01
-          - repo_url: https://github.com/laipeng668/immortalwrt.git
-            repo_branch: master
-            repo_short: immwrt
-            profile: Pro
-            device: jdcloud_re-cs-02
-          # repo: openwrt
-          - repo_url: https://github.com/laipeng668/openwrt.git
-            repo_branch: master
-            repo_short: openwrt
-            profile: Ultra
-            device: jdcloud_re-ss-01
-          - repo_url: https://github.com/laipeng668/openwrt.git
-            repo_branch: master
-            repo_short: openwrt
-            profile: Ultra
-            device: jdcloud_re-cs-02
-          - repo_url: https://github.com/laipeng668/openwrt.git
-            repo_branch: master
-            repo_short: openwrt
-            profile: Max
-            device: jdcloud_re-ss-01
-          - repo_url: https://github.com/laipeng668/openwrt.git
-            repo_branch: master
-            repo_short: openwrt
-            profile: Max
-            device: jdcloud_re-cs-02
-          - repo_url: https://github.com/laipeng668/openwrt.git
-            repo_branch: master
-            repo_short: openwrt
-            profile: Pro
-            device: jdcloud_re-ss-01
-          - repo_url: https://github.com/laipeng668/openwrt.git
-            repo_branch: master
-            repo_short: openwrt
-            profile: Pro
-            device: jdcloud_re-cs-02
-          # repo: libwrt
-          - repo_url: https://github.com/laipeng668/openwrt-6.x.git
-            repo_branch: k6.12-nss
-            repo_short: libwrt
-            profile: Ultra
-            device: jdcloud_re-ss-01
-          - repo_url: https://github.com/laipeng668/openwrt-6.x.git
-            repo_branch: k6.12-nss
-            repo_short: libwrt
-            profile: Ultra
-            device: jdcloud_re-cs-02
-          - repo_url: https://github.com/laipeng668/openwrt-6.x.git
-            repo_branch: k6.12-nss
-            repo_short: libwrt
-            profile: Max
-            device: jdcloud_re-ss-01
-          - repo_url: https://github.com/laipeng668/openwrt-6.x.git
-            repo_branch: k6.12-nss
-            repo_short: libwrt
-            profile: Max
-            device: jdcloud_re-cs-02
-          - repo_url: https://github.com/laipeng668/openwrt-6.x.git
-            repo_branch: k6.12-nss
-            repo_short: libwrt
-            profile: Pro
-            device: jdcloud_re-ss-01
-          - repo_url: https://github.com/laipeng668/openwrt-6.x.git
-            repo_branch: k6.12-nss
-            repo_short: libwrt
-            profile: Pro
-            device: jdcloud_re-cs-02
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+      max-parallel: 3
 
     steps:
-      - name: 'Checkout 当前仓库（包含 configs 与 scripts）'
+      - name: 'Checkout 仓库（包含 configs 与 scripts）'
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -144,7 +82,7 @@ jobs:
       - name: '准备环境 (安装必要工具)'
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y build-essential ccache unzip gzip bsdmainutils python3-pip pv rsync || true
+          sudo apt-get install -y build-essential ccache unzip gzip bsdmainutils python3-pip pv rsync jq || true
           pip3 --version || true
 
       - name: '运行编译脚本（单 device/profile）'
@@ -163,7 +101,7 @@ jobs:
           chmod +x ./scripts/build.sh ./scripts/script.sh || true
           ./scripts/build.sh
 
-      - name: '上传本 job 产物为 artifact'
+      - name: '上传本 job 产物为 artifact（包含 artifacts/ 与 logs/）'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ format('artifact-{0}-{1}-{2}', matrix.repo_short, matrix.profile, matrix.device) }}
@@ -187,17 +125,77 @@ jobs:
         with:
           path: downloaded_artifacts
 
-      - name: '列出下载的文件（调试）'
+      - name: '聚合 metadata 并生成 release body'
+        id: compose
         run: |
-          echo "下载目录内容："
-          find downloaded_artifacts -maxdepth 4 -type f -print | sed -n '1,200p'
+          set -euo pipefail
+          OUT="downloaded_artifacts"
+          # 聚合 metadata.json（假定每个 build job 在 artifacts/** 下生成 metadata.json）
+          metadata_files=$(find "${OUT}" -type f -name 'metadata.json' || true)
+          if [ -z "$metadata_files" ]; then
+            echo "No metadata.json found; generating basic release body"
+            echo "body<<EOF" >> $GITHUB_OUTPUT
+            echo "Release for ${{ env.CHIP }} - No metadata found" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # 汇总信息
+          devices_list=""
+          declare -A kernels
+          declare -A luci_apps_map
+
+          while IFS= read -r mf; do
+            # jq may not be available in some runners; try to use jq if exists, else use crude parsing
+            if command -v jq >/dev/null 2>&1; then
+              repo=$(jq -r '.repo_short' "$mf")
+              profile=$(jq -r '.profile' "$mf")
+              device=$(jq -r '.device' "$mf")
+              kernel=$(jq -r '.kernel_version // ""' "$mf")
+              luci=$(jq -r '.luci_apps[]?' "$mf" 2>/dev/null || true)
+            else
+              repo=$(grep -Po '"repo_short"\s*:\s*"\K[^"]+' "$mf" || true)
+              profile=$(grep -Po '"profile"\s*:\s*"\K[^"]+' "$mf" || true)
+              device=$(grep -Po '"device"\s*:\s*"\K[^"]+' "$mf" || true)
+              kernel=$(grep -Po '"kernel_version"\s*:\s*"\K[^"]+' "$mf" || true)
+              luci=$(grep -Po '"luci_apps"\s*:\s*\[\K[^\]]+' "$mf" | tr -d '"' | tr -d ' ' | tr ',' '\n' || true)
+            fi
+
+            devices_list="${devices_list}${repo}/${profile}/${device}\n"
+            if [ -n "$kernel" ]; then
+              kernels["$kernel"]=1
+            fi
+
+            # accumulate luci apps
+            if [ -n "$luci" ]; then
+              echo "$luci" | while IFS= read -r app; do
+                if [ -n "$app" ]; then
+                  luci_apps_map["$app"]=1
+                fi
+              done
+            fi
+          done <<< "$metadata_files"
+
+          # Build body
+          BODY="Release for ${{ env.CHIP }}\n\nAuthor: Mary\n\nDevices:\n"
+          BODY="${BODY}$(echo -e "$devices_list")\n"
+          BODY="${BODY}\nKernel versions found:\n"
+          for k in "${!kernels[@]}"; do BODY="${BODY}- $k\n"; done
+          BODY="${BODY}\nLuci apps (aggregated):\n"
+          for a in "${!luci_apps_map[@]}"; do BODY="${BODY}- $a\n"; done
+          BODY="${BODY}\nNotes: 默认管理地址: 192.168.111.1, 用户: root, 密码: none, 默认WIFI密码: 12345678\n"
+
+          # 输出为 step 输出
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: '创建 Release 并上传产物'
-        id: create_release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ format('{0}-{1}', github.run_number, env.CHIP) }}
           name: ${{ format('build-{0}-{1}', github.run_number, env.CHIP) }}
+          body: ${{ steps.compose.outputs.body }}
           files: |
             downloaded_artifacts/**/*
         env:

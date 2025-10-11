@@ -46,11 +46,35 @@ case "$COMMAND" in
             echo "用法: $0 get-devices <config_file>"
             exit 1
         fi
-        get_devices_from_config "$1"
+        
+        # 检查配置文件是否存在
+        if [ ! -f "$1" ]; then
+            log_error "配置文件 $1 不存在！"
+            echo "[]"
+            exit 1
+        fi
+        
+        log_info "正在从 $1 提取设备名..."
+        
+        # 使用正则表达式提取设备名
+        # 匹配模式: CONFIG_TARGET_..._DEVICE_设备名=y 或 CONFIG_TARGET_DEVICE_..._DEVICE_设备名=y
+        local devices
+        devices=$(grep -E "^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_[a-zA-Z0-9_-]+=y" "$1" | \
+                 sed -E 's/^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_([a-zA-Z0-9_-]+)=y$/\2/' | \
+                 sort -u)
+        
+        if [ -z "$devices" ]; then
+            log_warning "在 $1 中未找到任何设备"
+            echo "[]"
+            exit 0
+        fi
+        
+        # 确保输出有效的JSON数组
+        echo "$devices" | jq -R . | jq -s .
         ;;
         
     select-device)
-        if [ $# -ne 2 ]; then
+        if [ $# -ne 3 ]; then
             log_error "参数数量不正确"
             echo "用法: $0 select-device <config_file> <device_name> <chipset>"
             exit 1

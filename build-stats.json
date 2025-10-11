@@ -8,5 +8,10 @@
     "timestamp": "2025-10-11T14:55:26Z",
     "chipset": "ipq60xx",
     "result": "skipped"
+  },
+  {
+    "timestamp": "2025-10-11T15:16:07Z",
+    "chipset": "ipq60xx",
+    "result": "skipped"
   }
 ]

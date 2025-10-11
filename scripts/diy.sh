@@ -51,9 +51,20 @@ readonly MARY_PACKAGES=(
 # 阶段1: 在 feeds update 之前执行
 pre_feeds() {
     log_info "执行 DIY: 加载第三方软件源..."
+    
+    # 备份原始feeds.conf.default
+    if [ -f "feeds.conf.default" ]; then
+        cp feeds.conf.default feeds.conf.default.backup
+        log_info "已备份原始feeds.conf.default"
+    fi
+    
     # 添加自定义feeds到feeds.conf.default
     echo "src-git custom_packages https://github.com/sbwml/packages_lang_golang.git;main" >> feeds.conf.default
     echo "src-git custom_luci https://github.com/sbwml/luci-app-openlist2.git;main" >> feeds.conf.default
+    log_info "已添加自定义feeds源"
+    log_info "当前feeds.conf.default内容:"
+    cat feeds.conf.default
+    
     log_success "第三方软件源加载完成。"
 }
 
@@ -96,65 +107,105 @@ add_basic_packages() {
     
     # Go语言支持
     if [ ! -d "feeds/packages/lang/golang" ]; then
+        log_info "克隆 golang..."
         git clone --depth=1 "$GOLANG_REPO" feeds/packages/lang/golang
-        log_info "已添加: golang"
+        if [ -d "feeds/packages/lang/golang" ]; then
+            log_info "已添加: golang"
+        else
+            log_error "golang 克隆失败"
+        fi
     else
         log_info "golang 已存在，跳过"
     fi
     
     # OpenList
     if [ ! -d "package/openlist" ]; then
+        log_info "克隆 openlist..."
         git clone --depth=1 "$OPENLIST_REPO" package/openlist
-        log_info "已添加: openlist"
+        if [ -d "package/openlist" ]; then
+            log_info "已添加: openlist"
+        else
+            log_error "openlist 克隆失败"
+        fi
     else
         log_info "openlist 已存在，跳过"
     fi
     
     # ariang
     if [ ! -d "feeds/packages/net/ariang" ]; then
+        log_info "稀疏克隆 ariang..."
         git_sparse_clone ariang "$LAIPENG_PACKAGES_REPO" net/ariang
-        log_info "已添加: ariang"
+        if [ -d "feeds/packages/net/ariang" ]; then
+            log_info "已添加: ariang"
+        else
+            log_error "ariang 稀疏克隆失败"
+        fi
     else
         log_info "ariang 已存在，跳过"
     fi
     
     # frp
     if [ ! -d "feeds/packages/net/frp" ]; then
+        log_info "稀疏克隆 frp..."
         git_sparse_clone frp "$LAIPENG_PACKAGES_REPO" net/frp
-        log_info "已添加: frp"
+        if [ -d "feeds/packages/net/frp" ]; then
+            log_info "已添加: frp"
+        else
+            log_error "frp 稀疏克隆失败"
+        fi
     else
         log_info "frp 已存在，跳过"
     fi
     
     # frpc/frps
     if [ ! -d "feeds/luci/applications/luci-app-frpc" ]; then
+        log_info "稀疏克隆 frpc/frps..."
         git_sparse_clone frp "$LAIPENG_LUCI_REPO" applications/luci-app-frpc applications/luci-app-frps
-        log_info "已添加: frpc/frps"
+        if [ -d "feeds/luci/applications/luci-app-frpc" ]; then
+            log_info "已添加: frpc/frps"
+        else
+            log_error "frpc/frps 稀疏克隆失败"
+        fi
     else
         log_info "frpc/frps 已存在，跳过"
     fi
     
     # WolPlus
     if [ ! -d "package/luci-app-wolplus" ]; then
+        log_info "稀疏克隆 wolplus..."
         git_sparse_clone main "$VIKINGYFY_PACKAGES_REPO" luci-app-wolplus
-        log_info "已添加: wolplus"
+        if [ -d "package/luci-app-wolplus" ]; then
+            log_info "已添加: wolplus"
+        else
+            log_error "wolplus 稀疏克隆失败"
+        fi
     else
         log_info "wolplus 已存在，跳过"
     fi
     
     # GecoosAC
     if [ ! -d "package/openwrt-gecoosac" ]; then
+        log_info "克隆 gecoosac..."
         git clone --depth=1 "$GECOOSAC_REPO" package/openwrt-gecoosac
-        log_info "已添加: gecoosac"
+        if [ -d "package/openwrt-gecoosac" ]; then
+            log_info "已添加: gecoosac"
+        else
+            log_error "gecoosac 克隆失败"
+        fi
     else
         log_info "gecoosac 已存在，跳过"
     fi
     
     # Athena LED
     if [ ! -d "package/luci-app-athena-led" ]; then
+        log_info "克隆 athena-led..."
         git clone --depth=1 "$ATHENA_LED_REPO" package/luci-app-athena-led
-        chmod +x package/luci-app-athena-led/root/etc/init.d/athena_led package/luci-app-athena-led/root/usr/sbin/athena-led
-        log_info "已添加: athena-led"
+        if [ -d "package/luci-app-athena-led" ]; then
+            chmod +x package/luci-app-athena-led/root/etc/init.d/athena_led package/luci-app-athena-led/root/usr/sbin/athena-led
+            log_info "已添加: athena-led"
+        else
+            log_error "athena-led 克隆失败"
+        fi
     else
         log_info "athena-led 已存在，跳过"
     fi
@@ -171,7 +222,11 @@ add_mary_packages() {
         if [ ! -d "$target" ]; then
             log_info "克隆 $url 到 $target"
             git clone --depth=1 "$url" "$target"
-            log_info "已添加: $package_name"
+            if [ -d "$target" ]; then
+                log_info "已添加: $package_name"
+            else
+                log_error "$package_name 克隆失败"
+            fi
         else
             log_info "$package_name 已存在，跳过"
         fi
@@ -183,7 +238,11 @@ add_kenzok8_source() {
     log_info "添加kenzok8软件源..."
     if [ ! -d "small8" ]; then
         git clone --depth=1 "$KENZOK8_SMALL_REPO" small8 
-        log_info "已添加: kenzok8 small-package"
+        if [ -d "small8" ]; then
+            log_info "已添加: kenzok8 small-package"
+        else
+            log_error "kenzok8 small-package 克隆失败"
+        fi
     else
         log_info "kenzok8 small-package 已存在，跳过"
     fi
@@ -192,8 +251,26 @@ add_kenzok8_source() {
 # 更新和安装Feeds
 update_feeds() {
     log_info "更新和安装Feeds..."
+    
+    # 清理旧的feeds
+    log_info "清理旧的feeds..."
+    rm -rf feeds/
+    rm -rf package/feeds/
+    
+    # 初始化feeds
+    log_info "初始化feeds..."
+    ./scripts/feeds clean
+    ./scripts/feeds uninstall -a
+    
+    # 更新feeds
+    log_info "更新feeds..."
     ./scripts/feeds update -a
+    
+    # 安装feeds
+    log_info "安装feeds..."
     ./scripts/feeds install -a
+    
+    log_success "Feeds更新和安装完成"
 }
 
 # 执行实际的DIY操作
@@ -208,8 +285,7 @@ execute_diy() {
     
     # 重新更新feeds以包含新添加的包
     log_info "重新更新feeds以包含新添加的包..."
-    ./scripts/feeds update -a
-    ./scripts/feeds install -a
+    update_feeds
     
     log_success "DIY操作完成"
 }

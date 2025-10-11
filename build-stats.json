@@ -48,5 +48,10 @@
     "timestamp": "2025-10-11T16:32:13Z",
     "chipset": "ipq60xx",
     "result": "cancelled"
+  },
+  {
+    "timestamp": "2025-10-11T16:38:38Z",
+    "chipset": "ipq60xx",
+    "result": "skipped"
   }
 ]

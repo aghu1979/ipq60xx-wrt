@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/script.sh - 在上游仓库目录下执行，添加/更新第三方包、修改默认配置等（已优化）
+# scripts/diy.sh - 在上游仓库目录下执行，添加/更新第三方包、修改默认配置等（已优化）
 # 说明：
 #  1. build.sh 会在克隆上游仓库并切换到 UPSTREAM_DIR 后执行此脚本（即此脚本的当前目录为上游仓库根）
 #  2. 日志会写到 GITHUB_WORKSPACE/logs/script.log（build.sh 会设置环境变量 LOG_DIR/LOG_FILE）

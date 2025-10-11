@@ -80,8 +80,13 @@ get_devices_from_config() {
     fi
     
     log_info "正在从 $config_file 提取设备名..."
+    
+    # 使用正则表达式提取设备名
+    # 匹配模式: CONFIG_TARGET_..._DEVICE_设备名=y 或 CONFIG_TARGET_DEVICE_..._DEVICE_设备名=y
     local devices
-    devices=$(grep "^CONFIG_TARGET_DEVICE.*_DEVICE=y" "$config_file" | sed -n 's/^CONFIG_TARGET_DEVICE_.*_\(.*\)_DEVICE=y$/\1/p' || true)
+    devices=$(grep -E "^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_[a-zA-Z0-9_-]+=y" "$config_file" | \
+             sed -E 's/^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_([a-zA-Z0-9_-]+)=y$/\2/' | \
+             sort -u)
     
     if [ -z "$devices" ]; then
         log_warning "在 $config_file 中未找到任何设备"

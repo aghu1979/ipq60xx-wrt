@@ -10,17 +10,19 @@ on:
         required: true
         default: 'ipq60xx'
         type: choice
-        options: [ipq60xx, x86-64, rockchip-armv8]
+        options: [ipq60xx]
       ubuntu_version:
         description: '选择 Ubuntu 版本'
         required: true
         default: 'ubuntu-22.04'
         type: choice
         options: [ubuntu-22.04, ubuntu-24.04]
+  # 北京时间周五0点自动编译 (UTC时间周四16点)
+  schedule:
+    - cron: '0 16 * * 4'
 
 env:
   # --- 仓库配置 ---
-  # --- 唯一修改：更新了 repos.json 的路径 ---
   REPOS_CONFIG_FILE: 'configs/repos.json'
   # --- 构建配置 ---
   DEFAULT_CHIPSET: 'ipq60xx'
@@ -44,6 +46,12 @@ jobs:
     - name: 检出代码
       uses: actions/checkout@v4
 
+    - name: 设置脚本执行权限
+      run: |
+        chmod +x scripts/*.sh
+        chmod +x configs/*.json
+        fi
+
     - name: 生成构建矩阵
       id: set-matrix
       run: |
@@ -52,7 +60,11 @@ jobs:
         echo "chipset=$CHIPSET" >> $GITHUB_OUTPUT
         
         BASE_CONFIG="configs/${CHIPSET}.base.config"
-        if [ ! -f "$BASE_CONFIG" ]; then log_error "基础配置文件 $BASE_CONFIG 不存在！"; exit 1; fi
+        if [ ! -f "$BASE_CONFIG" ]; then 
+          log_error "基础配置文件 $BASE_CONFIG 不存在！"; 
+          exit 1; 
+        fi
+        
         REPOS_JSON=$(cat ${{ env.REPOS_CONFIG_FILE }})
         log_info "为芯片架构 $CHIPSET 生成设备矩阵..."
         DEVICE_JSON=$(./${{ env.SCRIPT_BUILD }} get-devices "$BASE_CONFIG")
@@ -65,23 +77,21 @@ jobs:
   prepare-third-party-cache:
     needs: generate-matrix
     runs-on: ${{ fromJson(needs.generate-matrix.outputs.ubuntu-matrix)[0] }}
+    outputs:
+      cache-hit: ${{ steps.cache.outputs.cache-hit }}
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
 
+    - name: 设置脚本执行权限
+      run: |
+        chmod +x scripts/*.sh
+        if [ -f "configs/repos.json" ]; then
+          chmod +x configs/repos.json
+        fi
+
     - name: 初始化构建环境
       run: |
-        # source ${{ env.SCRIPT_BUILD }}
-        # log_info "为第三方缓存初始化环境..."
-        # sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        # sudo -E apt-get -qq update
-        # sudo -E apt-get -qq install $(curl -fsSL ${{ env.DEPENDS_SCRIPT_URL }})
-        # sudo -E apt-get -qq autoremove --purge
-        # sudo -E apt-get -qq clean
-        # sudo timedatectl set-timezone "$TZ"
-        # sudo mkdir -p /workdir
-        # sudo chown $USER:$GROUPS /workdir
-
         source ${{ env.SCRIPT_BUILD }}
         log_info "为第三方缓存初始化环境..."
         sudo -E apt-get -y update
@@ -123,6 +133,7 @@ jobs:
         make defconfig
 
     - name: 缓存第三方包
+      id: cache
       uses: actions/cache@v4
       with:
         path: |
@@ -158,6 +169,13 @@ jobs:
     - name: 检出代码
       uses: actions/checkout@v4
 
+    - name: 设置脚本执行权限
+      run: |
+        chmod +x scripts/*.sh
+        if [ -f "configs/repos.json" ]; then
+          chmod +x configs/repos.json
+        fi
+
     - name: Cache ccache
       uses: actions/cache@v4
       with:
@@ -168,18 +186,6 @@ jobs:
 
     - name: 初始化构建环境
       run: |
-        # source ${{ env.SCRIPT_BUILD }}
-        # log_info "开始为 ${{ env.ARTIFACT_NAME }} 初始化环境..."
-        # sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        # sudo -E apt-get -qq update
-        # sudo -E apt-get -qq install $(curl -fsSL ${{ env.DEPENDS_SCRIPT_URL }})
-        # sudo -E apt-get -qq autoremove --purge
-        # sudo -E apt-get -qq clean
-        # sudo timedatectl set-timezone "$TZ"
-        # sudo mkdir -p /workdir
-        # sudo chown $USER:$GROUPS /workdir
-
-
         source ${{ env.SCRIPT_BUILD }}
         log_info "开始为 ${{ env.ARTIFACT_NAME }} 初始化环境..."
         sudo -E apt-get -y update
@@ -254,13 +260,23 @@ jobs:
         echo '${{ env.FIRMWARE_TYPES }}' | jq -r '.[]' | while read type; do
           log_info "正在查找固件类型: $type"
           FIRMWARE_PATH=$(find bin/targets -name "*${{ matrix.device }}*${type}" | head -n 1)
-          if [ -n "$FIRMWARE_PATH" ]; then log_success "找到固件: $FIRMWARE_PATH"; cp "$FIRMWARE_PATH" "$ARTIFACT_NAME/"; else log_warning "未找到类型为 $type 的固件，跳过。"; fi
+          if [ -n "$FIRMWARE_PATH" ]; then 
+            log_success "找到固件: $FIRMWARE_PATH"; 
+            cp "$FIRMWARE_PATH" "$ARTIFACT_NAME/"; 
+          else 
+            log_warning "未找到类型为 $type 的固件，跳过。"; 
+          fi
         done
         cp .config "$ARTIFACT_NAME.config"
         cp bin/targets/*/config.buildinfo "$ARTIFACT_NAME/"
         cp bin/targets/*/manifest "$ARTIFACT_NAME/"
         PACKAGES_DIR=$(find bin/targets -type d -name packages | head -n 1)
-        if [ -n "$PACKAGES_DIR" ]; then tar -czf "$ARTIFACT_NAME/packages.tar.gz" -C "$PACKAGES_DIR" .; else log_warning "未找到 packages 目录，将跳过打包。"; touch "$ARTIFACT_NAME/packages.tar.gz"; fi
+        if [ -n "$PACKAGES_DIR" ]; then 
+          tar -czf "$ARTIFACT_NAME/packages.tar.gz" -C "$PACKAGES_DIR" .; 
+        else 
+          log_warning "未找到 packages 目录，将跳过打包。"; 
+          touch "$ARTIFACT_NAME/packages.tar.gz"; 
+        fi
         cp "$LOG_FILE" "$ARTIFACT_NAME/"
         log_success "所有产物整理完成。"
 
@@ -278,6 +294,13 @@ jobs:
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
+
+    - name: 设置脚本执行权限
+      run: |
+        chmod +x scripts/*.sh
+        if [ -f "configs/repos.json" ]; then
+          chmod +x configs/repos.json
+        fi
 
     - name: 下载所有构建产物
       uses: actions/download-artifact@v4
@@ -301,3 +324,83 @@ jobs:
         fi
         gh release create "$TAG" --title "OpenWrt Firmware for $CHIPSET_NAME ($(date '+%Y-%m-%d'))" --notes-file release_notes.md --latest artifacts/**/*
         log_success "Release $TAG 发布成功！"
+
+  # 新增：更新构建状态徽章
+  update-build-status:
+    needs: [create-release]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置脚本执行权限
+      run: |
+        chmod +x scripts/*.sh
+        if [ -f "configs/repos.json" ]; then
+          chmod +x configs/repos.json
+        fi
+
+    - name: 更新构建状态徽章
+      run: |
+        # 根据构建结果设置徽章状态
+        if [ "${{ needs.create-release.result }}" == "success" ]; then
+          STATUS="passing"
+          COLOR="brightgreen"
+          MESSAGE="Build%20Success"
+        else
+          STATUS="failing"
+          COLOR="red"
+          MESSAGE="Build%20Failed"
+        fi
+        
+        # 更新README中的徽章
+        sed -i "s|https://img.shields.io/badge/build-.*-.*|https://img.shields.io/badge/build-${MESSAGE}-${COLOR}?style=flat-square|g" README.md
+        
+        # 提交更改
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add README.md
+        git diff --staged --quiet || git commit -m "Update build status badge [skip ci]"
+        git push
+
+  # 新增：记录构建统计
+  record-build-stats:
+    needs: [generate-matrix, build-firmware]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置脚本执行权限
+      run: |
+        chmod +x scripts/*.sh
+        if [ -f "configs/repos.json" ]; then
+          chmod +x configs/repos.json
+        fi
+
+    - name: 记录构建统计
+      run: |
+        # 创建或更新构建统计文件
+        STATS_FILE="build-stats.json"
+        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        CHIPSET="${{ needs.generate-matrix.outputs.chipset }}"
+        RESULT="${{ needs.build-firmware.result }}"
+        
+        # 如果文件不存在，创建空数组
+        if [ ! -f "$STATS_FILE" ]; then
+          echo "[]" > "$STATS_FILE"
+        fi
+        
+        # 添加新的构建记录
+        jq --arg timestamp "$TIMESTAMP" --arg chipset "$CHIPSET" --arg result "$RESULT" \
+          '. += [{timestamp: $timestamp, chipset: $chipset, result: $result}]' \
+          "$STATS_FILE" > tmp.json && mv tmp.json "$STATS_FILE"
+        
+        # 提交更改
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add "$STATS_FILE"
+        git diff --staged --quiet || git commit -m "Record build statistics [skip ci]"
+        git push

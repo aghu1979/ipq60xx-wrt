@@ -59,10 +59,31 @@ case "$COMMAND" in
         
         # 使用正则表达式提取设备名
         # 匹配模式: CONFIG_TARGET_..._DEVICE_设备名=y 或 CONFIG_TARGET_DEVICE_..._DEVICE_设备名=y
+        log_info "使用原始正则匹配..." >&2
         devices=$(grep -E "^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_[a-zA-Z0-9_-]+=y" "$1" | \
                  sed -E 's/^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_([a-zA-Z0-9_-]+)=y$/\2/' | \
-                 grep -v "^ROOTFS$" | \  # 过滤掉ROOTFS
+                 grep -v "^ROOTFS$" | \
                  sort -u)
+        
+        # 如果原始正则没有匹配到，尝试更宽松的匹配
+        if [ -z "$devices" ]; then
+            log_info "原始正则未匹配到，尝试宽松匹配..." >&2
+            devices=$(grep -E "CONFIG_TARGET.*DEVICE.*=y" "$1" | \
+                     sed -E 's/^.*DEVICE_([a-zA-Z0-9_-]+)=y$/\1/' | \
+                     grep -v "^ROOTFS$" | \
+                     sort -u)
+        fi
+        
+        # 如果还是没有匹配到，尝试更简单的匹配
+        if [ -z "$devices" ]; then
+            log_info "宽松匹配也未匹配到，尝试简单匹配..." >&2
+            devices=$(grep -E "DEVICE_[a-zA-Z0-9_-]+=" "$1" | \
+                     sed -E 's/^.*DEVICE_([a-zA-Z0-9_-]+)=.*$/\1/' | \
+                     grep -v "^ROOTFS$" | \
+                     sort -u)
+        fi
+        
+        log_info "提取到的设备名: $devices" >&2
         
         if [ -z "$devices" ]; then
             log_warning "在 $1 中未找到任何设备" >&2

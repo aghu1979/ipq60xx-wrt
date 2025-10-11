@@ -174,8 +174,8 @@ jobs:
             exit 1
           fi
           
-          # 生成构建矩阵
-          MATRIX=$(jq -n \
+          # 生成构建矩阵，确保输出格式正确
+          MATRIX=$(jq -c -n \
             --argjson repos "$REPOS_JSON" \
             --argjson devices "$DEVICE_JSON" \
             --argjson profiles "$PROFILES" \
@@ -190,7 +190,8 @@ jobs:
             exit 1
           fi
           
-          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          # 使用 ::set-output 命令设置输出，确保格式正确
+          echo "::set-output name=matrix::$MATRIX"
           echo "ubuntu=[\"${{ github.event.inputs.ubuntu_version || 'ubuntu-22.04' }}\"]" >> $GITHUB_OUTPUT
           echo "tag=${CHIPSET}-$(date '+%Y%m%d')" >> $GITHUB_OUTPUT
           log_success "矩阵和 Release Tag 生成完成。"

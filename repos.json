@@ -1,0 +1,17 @@
+[
+  {
+    "name": "openwrt",
+    "url": "https://github.com/openwrt/openwrt.git",
+    "default_branch": "openwrt-23.05"
+  },
+  {
+    "name": "immwrt",
+    "url": "https://github.com/immortalwrt/immortalwrt.git",
+    "default_branch": "main"
+  },
+  {
+    "name": "libwrt",
+    "url": "https://github.com/Lienol/openwrt.git",
+    "default_branch": "main"
+  }
+]

@@ -50,7 +50,6 @@ jobs:
       run: |
         chmod +x scripts/*.sh
         chmod +x configs/*.json
-        fi
 
     - name: 生成构建矩阵
       id: set-matrix

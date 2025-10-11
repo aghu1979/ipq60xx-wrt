@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
 # -*- coding: utf-8 -*-
-# build.sh - 支持单 device/profile 模式或批量模式
-# 如果环境变量 PROFILE 和 DEVICE 存在，则只构建指定 profile/device（用于 matrix 并行）
-# 否则按原有逻辑在单 job 内按 BUILD_ORDER 遍历构建
+# build.sh - 支持单 device/profile 模式（用于 matrix）或批量模式
 set -euo pipefail
 IFS=$'\n\t'
 
-# 环境变量（可由 workflow 覆盖）
 REPO_URL="${REPO_URL:-}"
 REPO_BRANCH="${REPO_BRANCH:-master}"
 REPO_SHORT="${REPO_SHORT:-openwrt}"
@@ -18,7 +15,6 @@ BUILD_ORDER="${BUILD_ORDER:-Ultra Max Pro}"
 NPROC="${NPROC:-$(nproc)}"
 GITHUB_WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
 
-# 支持单 device/profile 模式
 PROFILE_ENV="${PROFILE:-}"
 DEVICE_ENV="${DEVICE:-}"
 
@@ -31,10 +27,9 @@ ERR_LOG="$GITHUB_WORKSPACE/$LOG_DIR/build_${REPO_SHORT}_error.log"
 
 mkdir -p "$WORKDIR" "$OUTPUT_DIR" "$TMP_DIR" "$GITHUB_WORKSPACE/$LOG_DIR"
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; PLAIN='\033[0m'
-log() { echo -e "${GREEN}[$(date '+%F %T')] $*${PLAIN}" | tee -a "$LOG_FILE"; }
-warn() { echo -e "${YELLOW}[$(date '+%F %T')] WARN: $*${PLAIN}" | tee -a "$LOG_FILE"; }
-err() { echo -e "${RED}[$(date '+%F %T')] ERROR: $*${PLAIN}" | tee -a "$LOG_FILE"; echo "[$(date '+%F %T')] ERROR: $*" >> "$ERR_LOG"; }
+log() { echo "[$(date '+%F %T')] [INFO] $*" | tee -a "$LOG_FILE"; }
+warn() { echo "[$(date '+%F %T')] [WARN] $*" | tee -a "$LOG_FILE"; }
+err() { echo "[$(date '+%F %T')] [ERROR] $*" | tee -a "$LOG_FILE"; echo "[$(date '+%F %T')] ERROR: $*" >> "$ERR_LOG"; }
 
 on_error() {
   local code=$?
@@ -53,15 +48,14 @@ fi
 log "开始构建: repo=${REPO_SHORT} url=${REPO_URL} branch=${REPO_BRANCH} chip=${CHIP}"
 log "工作目录: $WORKDIR"
 
-# 克隆上游仓库（浅克隆）
 cd "$WORKDIR"
 rm -rf "$UPSTREAM_DIR"
 log "克隆上游仓库: $REPO_URL @ $REPO_BRANCH"
 git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$UPSTREAM_DIR" >> "$LOG_FILE" 2>&1
 
-# 在上游仓库中运行用户提供的 scripts/script.sh（如果存在）
+# 在上游仓库中运行用户 scripts/script.sh（if present）
 if [ -f "$GITHUB_WORKSPACE/scripts/script.sh" ]; then
-  log "在上游仓库执行自定义脚本 scripts/script.sh（当前目录为 UPSTREAM_DIR）"
+  log "在上游仓库执行 scripts/script.sh"
   pushd "$UPSTREAM_DIR" > /dev/null
   export LOG_DIR="$GITHUB_WORKSPACE/$LOG_DIR"
   export LOG_FILE="$LOG_DIR/script.log"
@@ -73,22 +67,21 @@ if [ -f "$GITHUB_WORKSPACE/scripts/script.sh" ]; then
     exit 1
   fi
   popd > /dev/null
-  log "自定义脚本执行完成"
+  log "scripts/script.sh 执行完成"
 else
-  warn "未找到仓库根的 scripts/script.sh，跳过自定义脚本步骤"
+  warn "未找到仓库根的 scripts/script.sh，跳过"
 fi
 
-# 复制 configs（来自本仓库）
+# 复制 configs
 if [ ! -d "$GITHUB_WORKSPACE/$CONFIGS_DIR" ]; then
   err "找不到 configs 目录: $GITHUB_WORKSPACE/$CONFIGS_DIR"
   exit 3
 fi
 cp -a "$GITHUB_WORKSPACE/$CONFIGS_DIR" "$TMP_DIR/"
 
-# 合并配置： chip_base + repo_base + package_cfg（如果存在）
+# 合并函数：chip_base + repo_base + package_cfg（存在则加）
 merge_configs() {
-  local package_cfg="$1"
-  local outcfg="$2"
+  local package_cfg="$1"; local outcfg="$2"
   local chip_base="$TMP_DIR/${CHIP}_base.config"
   local repo_base="$TMP_DIR/${REPO_SHORT}_base.config"
 
@@ -99,9 +92,8 @@ merge_configs() {
   [ -f "$repo_base" ] && srcs+=("$repo_base")
   [ -n "$package_cfg" ] && [ -f "$package_cfg" ] && srcs+=("$package_cfg")
 
-  # 如果没有任何源，输出空文件并返回
   if [ ${#srcs[@]} -eq 0 ]; then
-    log "没有找到任何配置来源，生成空配置 $outcfg"
+    log "没有配置来源，生成空配置 $outcfg"
     : > "$outcfg"
     return 0
   fi
@@ -124,7 +116,6 @@ merge_configs() {
   ' "${srcs[@]}" > "$outcfg"
 }
 
-# 从合并后的 config 中提取 device 名称（=y 形式）
 extract_devices() {
   local cfg="$1"
   awk '/^CONFIG_TARGET_DEVICE_.*=y/ {
@@ -132,18 +123,14 @@ extract_devices() {
   }' "$cfg" | sort -u
 }
 
-# 为指定 device 从 merged config 生成 per-device .config
 generate_device_config() {
-  local merged="$1"
-  local device="$2"
-  local out="$3"
-
+  local merged="$1"; local device="$2"; local out="$3"
   log "生成设备配置: $device -> $out"
   awk -v keep="$device" '
     {
       line=$0
       if (match(line,/^(CONFIG_TARGET_DEVICE_[^_]+_DEVICE_)([^=]+)=(y|n)/,m)) {
-        key=m[1]; dev=m[2]; val=m[3]
+        key=m[1]; dev=m[2]
         if (dev==keep) {
           print key dev "=y"
         } else {
@@ -163,26 +150,58 @@ generate_device_config() {
   ' "$merged" > "$out"
 }
 
-# 构建单个 device/profile 的函数（在 UPSTREAM_DIR 下执行 make）
+# 提取 luci-app 列表（从 per-device .config 中查找 CONFIG_PACKAGE_luci-*)
+extract_luci_apps() {
+  local cfg="$1"
+  awk -F'=' '/^CONFIG_PACKAGE_luci-/ {
+    gsub(/CONFIG_PACKAGE_/, "", $1)
+    pkg=$1
+    gsub(/[ \t"]/, "", pkg)
+    print pkg
+  }' "$cfg" | sort -u
+}
+
+# 尝试从 manifest 或 config.buildinfo 中提取内核版本（若找不到则空）
+extract_kernel_version() {
+  local basedir="$1"
+  # try manifest
+  local mf=$(find "$basedir" -maxdepth 2 -type f -name '*.manifest' | head -n1 || true)
+  if [ -n "$mf" ]; then
+    # 试着解析常见的关键字
+    grep -E 'Linux|kernel|KERNEL|Kernel' "$mf" -m1 -n >/dev/null 2>&1 || true
+    kv=$(grep -E 'Linux|kernel|KERNEL|Kernel' "$mf" | head -n1 || true)
+    if [ -n "$kv" ]; then
+      echo "$kv" | tr -d '\r\n'
+      return 0
+    fi
+  fi
+  # try config.buildinfo
+  local bi=$(find "$basedir" -maxdepth 2 -type f -name '*.config.buildinfo' | head -n1 || true)
+  if [ -n "$bi" ]; then
+    kv=$(grep -E 'KERNEL|kernel|Linux' "$bi" | head -n1 || true)
+    if [ -n "$kv" ]; then
+      echo "$kv" | tr -d '\r\n'
+      return 0
+    fi
+  fi
+  echo ""
+}
+
+# 构建并收集产物
 build_device() {
-  local cfg="$1"   # 完整 .config 路径
-  local profile="$2"
-  local device="$3"
-
+  local cfg="$1"; local profile="$2"; local device="$3"
   log "开始构建 device=${device} profile=${profile}"
-
   cd "$UPSTREAM_DIR"
   cp "$cfg" .config
-  log "执行 make defconfig"
+  log "make defconfig"
   make defconfig >> "$LOG_FILE" 2>&1
-
   log "开始 make -j$NPROC V=s"
   if ! make -j"$NPROC" V=s >> "$LOG_FILE" 2>&1; then
-    err "make 失败，详见日志 $LOG_FILE"
+    err "make 失败"
     return 1
   fi
 
-  # 收集固件 bin 文件
+  # 收集固件
   local bins_root="$UPSTREAM_DIR/bin/targets"
   local found=0
   while IFS= read -r f; do
@@ -194,15 +213,15 @@ build_device() {
     local newname="${REPO_SHORT}-${CHIP}-${device}-${suffix}-${profile}.bin"
     mkdir -p "$OUTPUT_DIR/${REPO_SHORT}/${profile}/${device}"
     cp -f "$f" "$OUTPUT_DIR/${REPO_SHORT}/${profile}/${device}/$newname"
-    log "复制固件: $f -> $OUTPUT_DIR/${REPO_SHORT}/${profile}/${device}/$newname"
     sha256sum "$OUTPUT_DIR/${REPO_SHORT}/${profile}/${device}/$newname" > "$OUTPUT_DIR/${REPO_SHORT}/${profile}/${device}/$newname.sha256"
+    log "复制固件: $f -> $OUTPUT_DIR/${REPO_SHORT}/${profile}/${device}/$newname"
   done < <(find "$bins_root" -type f -iregex '.*\(factory\|sysupgrade\).*\.bin$' || true)
 
   if [ "$found" -eq 0 ]; then
     warn "未找到 factory/sysupgrade 固件"
   fi
 
-  # 复制 manifest/config buildinfo
+  # 复制元数据
   for f in $(find "$UPSTREAM_DIR" -maxdepth 3 -type f \( -name '*.manifest' -o -name '*.config.buildinfo' -o -name '*.config' \) 2>/dev/null); do
     local ext="${f##*.}"
     local dest="$OUTPUT_DIR/${REPO_SHORT}/${profile}/${device}/${REPO_SHORT}-${CHIP}-${device}-${profile}.${ext}"
@@ -210,73 +229,96 @@ build_device() {
     log "复制元数据: $f -> $dest"
   done
 
-  # 收集 ipk/apk 包
+  # 收集 ipk/apk
   local pkg_dir="$UPSTREAM_DIR/bin/packages"
   if [ -d "$pkg_dir" ]; then
     mkdir -p "$OUTPUT_DIR/${REPO_SHORT}/${profile}/${device}/app"
     find "$pkg_dir" -type f \( -name '*.ipk' -o -name '*.apk' \) -exec cp -f {} "$OUTPUT_DIR/${REPO_SHORT}/${profile}/${device}/app/" \;
   fi
 
-  log "device=${device} profile=${profile} 构建与收集完成"
+  # 生成 metadata.json
+  meta_dir="$OUTPUT_DIR/${REPO_SHORT}/${profile}/${device}"
+  mkdir -p "$meta_dir"
+  kernel=$(extract_kernel_version "$UPSTREAM_DIR")
+  luci_list=$(extract_luci_apps "$cfg" | jq -R -s -c 'split("\n")[:-1]' 2>/dev/null || python3 - <<PY
+import sys, json
+s=sys.stdin.read().strip().splitlines()
+s=[x for x in s if x.strip()!='']
+print(json.dumps(s))
+PY <<EOF
+$(extract_luci_apps "$cfg" | sed 's/"/\\"/g')
+EOF
+)
+  # Fallback if previous failed: use simple comma separated list
+  if [ -z "$luci_list" ] || [ "$luci_list" = "null" ]; then
+    luci_list="[]"
+  fi
+
+  # list artifacts
+  arts=$(find "$meta_dir" -type f -maxdepth 2 -printf "%P\n" 2>/dev/null | jq -R -s -c 'split("\n")[:-1]' 2>/dev/null || true)
+  if [ -z "$arts" ]; then
+    # fallback: minimal
+    arts="[]"
+  fi
+
+  cat > "$meta_dir/metadata.json" <<EOF
+{
+  "repo_short": "${REPO_SHORT}",
+  "profile": "${profile}",
+  "device": "${device}",
+  "kernel_version": $(python3 - <<PY
+import json,sys
+k=${kernel!+repr(kernel) if kernel else "''"}
+print(json.dumps($kernel) if False else json.dumps("$kernel"))
+PY
+) ,
+  "luci_apps": ${luci_list},
+  "artifacts": ${arts}
+}
+EOF
+
+  log "生成 metadata.json 在 $meta_dir/metadata.json"
   return 0
 }
 
-# 主流程：两种运行模式
-# 如果 PROFILE_ENV 和 DEVICE_ENV 都设置，则只构建单个 device/profile
+# 主流程：两种模式
 if [ -n "$PROFILE_ENV" ] && [ -n "$DEVICE_ENV" ]; then
-  profile="$PROFILE_ENV"
-  device="$DEVICE_ENV"
-  # PACKAGE_CFG 需要初始化以避免 unbound variable
+  profile="$PROFILE_ENV"; device="$DEVICE_ENV"
   PACKAGE_CFG=""
-  # 找到 package 配置文件（大小写兼容）
-  if [ -f "$TMP_DIR/${profile}.config" ]; then
-    PACKAGE_CFG="$TMP_DIR/${profile}.config"
-  elif [ -f "$TMP_DIR/${profile}.Config" ]; then
-    PACKAGE_CFG="$TMP_DIR/${profile}.Config"
-  fi
+  if [ -f "$TMP_DIR/${profile}.config" ]; then PACKAGE_CFG="$TMP_DIR/${profile}.config"; fi
+  if [ -f "$TMP_DIR/${profile}.Config" ]; then PACKAGE_CFG="$TMP_DIR/${profile}.Config"; fi
   MERGED_CFG="$TMP_DIR/merged_${REPO_SHORT}_${profile}.config"
   merge_configs "$PACKAGE_CFG" "$MERGED_CFG"
-
-  # 生成单设备 config（如果 merged 中没有该 device，会仍然生成一个基本 config）
   PER_DEV_CFG="$TMP_DIR/${REPO_SHORT}_${profile}_${device}.config"
   generate_device_config "$MERGED_CFG" "$device" "$PER_DEV_CFG"
-
   if ! build_device "$PER_DEV_CFG" "$profile" "$device"; then
-    err "单设备构建失败： device=$device profile=$profile"
+    err "单设备构建失败"
     exit 1
   fi
-
 else
-  # 原有批量模式（按 BUILD_ORDER 遍历）
   for profile in $BUILD_ORDER; do
     PACKAGE_CFG=""
-    if [ -f "$TMP_DIR/${profile}.config" ]; then
-      PACKAGE_CFG="$TMP_DIR/${profile}.config"
-    elif [ -f "$TMP_DIR/${profile}.Config" ]; then
-      PACKAGE_CFG="$TMP_DIR/${profile}.Config"
-    fi
-
+    if [ -f "$TMP_DIR/${profile}.config" ]; then PACKAGE_CFG="$TMP_DIR/${profile}.config"; fi
+    if [ -f "$TMP_DIR/${profile}.Config" ]; then PACKAGE_CFG="$TMP_DIR/${profile}.Config"; fi
     MERGED_CFG="$TMP_DIR/merged_${REPO_SHORT}_${profile}.config"
     merge_configs "$PACKAGE_CFG" "$MERGED_CFG"
-
     devices=$(extract_devices "$MERGED_CFG" || true)
     if [ -z "$devices" ]; then
-      warn "profile=$profile 未找到任何 device，跳过"
+      warn "profile=$profile 未找到 device，跳过"
       continue
     fi
-
     for device in $devices; do
       PER_DEV_CFG="$TMP_DIR/${REPO_SHORT}_${profile}_${device}.config"
       generate_device_config "$MERGED_CFG" "$device" "$PER_DEV_CFG"
       if ! build_device "$PER_DEV_CFG" "$profile" "$device"; then
-        err "device=$device profile=$profile 构建失败，终止"
+        err "device=$device profile=$profile 构建失败"
         exit 1
       fi
     done
   done
 fi
 
-# 打包 artifacts/logs 为便于上传（每个 job 会上传 artifacts/**）
+# 打包 artifacts/logs
 cd "$GITHUB_WORKSPACE" || true
 tar -czf "$OUTPUT_DIR/${CHIP}-config.tar.gz" -C "$OUTPUT_DIR" . || true
 tar -czf "$OUTPUT_DIR/${CHIP}-log.tar.gz" -C "$LOG_DIR" . || true

@@ -7,7 +7,7 @@ on:
         description: '选择运行器（ubuntu-22.04 或 ubuntu-24.04）'
         required: false
         default: 'ubuntu-22.04'
-  # 定时触发：北京时间每周五 00:00（对应 UTC 的前一日 16:00）
+  # 定时触发：北京时间每周五 00:00（对应 UTC 前一日 16:00）
   schedule:
     - cron: '0 16 * * 4'
 
@@ -21,87 +21,133 @@ env:
   ARTIFACT_DIR: artifacts
   LOG_DIR: logs
   CACHE_VERSION: 'v1'
+  # 如需改变构建顺序可调整此处
   BUILD_ORDER: "Ultra Max Pro"
 
 jobs:
+  # 并行构建 job：每个 matrix entry 是一个 repo/profile/device 的构建
   build:
-    name: "编译: ${{ matrix.repo_short }}"
+    name: "构建: ${{ matrix.repo_short }} - ${{ matrix.profile }} - ${{ matrix.device }}"
     runs-on: ${{ github.event.inputs.runner || 'ubuntu-22.04' }}
     strategy:
+      fail-fast: false
       matrix:
         include:
+          # repo: immwrt
           - repo_url: https://github.com/laipeng668/immortalwrt.git
             repo_branch: master
             repo_short: immwrt
+            profile: Ultra
+            device: jdcloud_re-ss-01
+          - repo_url: https://github.com/laipeng668/immortalwrt.git
+            repo_branch: master
+            repo_short: immwrt
+            profile: Ultra
+            device: jdcloud_re-cs-02
+          - repo_url: https://github.com/laipeng668/immortalwrt.git
+            repo_branch: master
+            repo_short: immwrt
+            profile: Max
+            device: jdcloud_re-ss-01
+          - repo_url: https://github.com/laipeng668/immortalwrt.git
+            repo_branch: master
+            repo_short: immwrt
+            profile: Max
+            device: jdcloud_re-cs-02
+          - repo_url: https://github.com/laipeng668/immortalwrt.git
+            repo_branch: master
+            repo_short: immwrt
+            profile: Pro
+            device: jdcloud_re-ss-01
+          - repo_url: https://github.com/laipeng668/immortalwrt.git
+            repo_branch: master
+            repo_short: immwrt
+            profile: Pro
+            device: jdcloud_re-cs-02
+          # repo: openwrt
           - repo_url: https://github.com/laipeng668/openwrt.git
             repo_branch: master
             repo_short: openwrt
+            profile: Ultra
+            device: jdcloud_re-ss-01
+          - repo_url: https://github.com/laipeng668/openwrt.git
+            repo_branch: master
+            repo_short: openwrt
+            profile: Ultra
+            device: jdcloud_re-cs-02
+          - repo_url: https://github.com/laipeng668/openwrt.git
+            repo_branch: master
+            repo_short: openwrt
+            profile: Max
+            device: jdcloud_re-ss-01
+          - repo_url: https://github.com/laipeng668/openwrt.git
+            repo_branch: master
+            repo_short: openwrt
+            profile: Max
+            device: jdcloud_re-cs-02
+          - repo_url: https://github.com/laipeng668/openwrt.git
+            repo_branch: master
+            repo_short: openwrt
+            profile: Pro
+            device: jdcloud_re-ss-01
+          - repo_url: https://github.com/laipeng668/openwrt.git
+            repo_branch: master
+            repo_short: openwrt
+            profile: Pro
+            device: jdcloud_re-cs-02
+          # repo: libwrt
           - repo_url: https://github.com/laipeng668/openwrt-6.x.git
             repo_branch: k6.12-nss
             repo_short: libwrt
+            profile: Ultra
+            device: jdcloud_re-ss-01
+          - repo_url: https://github.com/laipeng668/openwrt-6.x.git
+            repo_branch: k6.12-nss
+            repo_short: libwrt
+            profile: Ultra
+            device: jdcloud_re-cs-02
+          - repo_url: https://github.com/laipeng668/openwrt-6.x.git
+            repo_branch: k6.12-nss
+            repo_short: libwrt
+            profile: Max
+            device: jdcloud_re-ss-01
+          - repo_url: https://github.com/laipeng668/openwrt-6.x.git
+            repo_branch: k6.12-nss
+            repo_short: libwrt
+            profile: Max
+            device: jdcloud_re-cs-02
+          - repo_url: https://github.com/laipeng668/openwrt-6.x.git
+            repo_branch: k6.12-nss
+            repo_short: libwrt
+            profile: Pro
+            device: jdcloud_re-ss-01
+          - repo_url: https://github.com/laipeng668/openwrt-6.x.git
+            repo_branch: k6.12-nss
+            repo_short: libwrt
+            profile: Pro
+            device: jdcloud_re-cs-02
 
     steps:
-      - name: "Checkout 当前仓库（包含 configs 与 scripts）"
+      - name: 'Checkout 当前仓库（包含 configs 与 scripts）'
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: "显示输入参数"
+      - name: '显示参数'
         run: |
           echo "Runner: ${{ github.event.inputs.runner }}"
           echo "Repo: ${{ matrix.repo_short }}"
           echo "Upstream: ${{ matrix.repo_url }} @ ${{ matrix.repo_branch }}"
+          echo "Profile: ${{ matrix.profile }}"
+          echo "Device: ${{ matrix.device }}"
 
-      - name: 'Cache: dl'
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/downloads
-            dl
-            download
-          key: ${{ matrix.repo_short }}-${{ env.CHIP }}-dl-${{ env.CACHE_VERSION }}-${{ hashFiles('configs/**') }}
-          restore-keys: |
-            ${{ matrix.repo_short }}-${{ env.CHIP }}-dl-${{ env.CACHE_VERSION }}-
-
-      - name: 'Cache: toolchain'
-        uses: actions/cache@v4
-        with:
-          path: |
-            toolchain
-            staging_dir/toolchain-*
-            .toolchain
-          key: ${{ matrix.repo_short }}-${{ env.CHIP }}-toolchain-${{ env.CACHE_VERSION }}-${{ hashFiles('configs/**') }}
-          restore-keys: |
-            ${{ matrix.repo_short }}-${{ env.CHIP }}-toolchain-${{ env.CACHE_VERSION }}-
-
-      - name: 'Cache: feeds & packages'
-        uses: actions/cache@v4
-        with:
-          path: |
-            feeds
-            feeds/*/dl
-            package/*/dl
-          key: ${{ matrix.repo_short }}-${{ env.CHIP }}-feeds-${{ env.CACHE_VERSION }}-${{ hashFiles('configs/**') }}
-          restore-keys: |
-            ${{ matrix.repo_short }}-${{ env.CHIP }}-feeds-${{ env.CACHE_VERSION }}-
-
-      - name: 'Cache: ccache'
-        uses: actions/cache@v4
-        with:
-          path: |
-            .ccache
-            ~/.ccache
-          key: ${{ matrix.repo_short }}-${{ env.CHIP }}-ccache-${{ env.CACHE_VERSION }}-${{ hashFiles('configs/**') }}
-          restore-keys: |
-            ${{ matrix.repo_short }}-${{ env.CHIP }}-ccache-${{ env.CACHE_VERSION }}-
-
-      - name: "准备环境 (安装必要工具)"
+      - name: '准备环境 (安装必要工具)'
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y build-essential ccache unzip gzip bsdmainutils python3-pip pv rsync
+          sudo apt-get install -y build-essential ccache unzip gzip bsdmainutils python3-pip pv rsync || true
           pip3 --version || true
 
-      - name: "运行编译脚本（主流程）"
+      - name: '运行编译脚本（单 device/profile）'
         env:
           REPO_URL: ${{ matrix.repo_url }}
           REPO_BRANCH: ${{ matrix.repo_branch }}
@@ -111,17 +157,48 @@ jobs:
           ARTIFACT_DIR: ${{ env.ARTIFACT_DIR }}
           LOG_DIR: ${{ env.LOG_DIR }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROFILE: ${{ matrix.profile }}
+          DEVICE: ${{ matrix.device }}
         run: |
           chmod +x ./scripts/build.sh ./scripts/script.sh || true
           ./scripts/build.sh
 
-      - name: "收集产物并创建 Release"
-        id: release
+      - name: '上传本 job 产物为 artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ format('artifact-{0}-{1}-{2}', matrix.repo_short, matrix.profile, matrix.device) }}
+          path: |
+            artifacts/**
+            logs/**
+
+  # 发布 job：等待所有并行构建完成后执行（汇总 artifacts 并发布到 Release）
+  publish:
+    name: '发布 Release（汇总所有 artifact）'
+    runs-on: ubuntu-22.04
+    needs: build
+    steps:
+      - name: 'Checkout 仓库用于发布说明'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: '下载所有构建 job 的 artifacts'
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded_artifacts
+
+      - name: '列出下载的文件（调试）'
+        run: |
+          echo "下载目录内容："
+          find downloaded_artifacts -maxdepth 4 -type f -print | sed -n '1,200p'
+
+      - name: '创建 Release 并上传产物'
+        id: create_release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ format('{0}-{1}', github.run_id, env.CHIP) }}
-          name: ${{ format('build-{0}-{1}', github.run_id, env.CHIP) }}
+          tag_name: ${{ format('{0}-{1}', github.run_number, env.CHIP) }}
+          name: ${{ format('build-{0}-{1}', github.run_number, env.CHIP) }}
           files: |
-            artifacts/**/*
+            downloaded_artifacts/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

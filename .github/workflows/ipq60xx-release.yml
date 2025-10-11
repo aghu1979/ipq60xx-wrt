@@ -46,11 +46,9 @@ jobs:
         name: '生成 matrix JSON'
         run: |
           chmod +x ./scripts/prepare_matrix.sh || true
-          # 将生成的 JSON 放到 matrix.json
           ./scripts/prepare_matrix.sh > matrix.json
           echo "matrix file content:"
           cat matrix.json
-          # 将 matrix.json 的内容写到 job output（支持多行）
           echo "matrix<<EOF" >> $GITHUB_OUTPUT
           cat matrix.json >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -62,7 +60,8 @@ jobs:
     runs-on: ${{ github.event.inputs.runner || 'ubuntu-22.04' }}
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+      matrix:
+        include: ${{ fromJson(needs.prepare.outputs.matrix) }}
       max-parallel: 3
 
     steps:
@@ -130,23 +129,19 @@ jobs:
         run: |
           set -euo pipefail
           OUT="downloaded_artifacts"
-          # 聚合 metadata.json（假定每个 build job 在 artifacts/** 下生成 metadata.json）
           metadata_files=$(find "${OUT}" -type f -name 'metadata.json' || true)
           if [ -z "$metadata_files" ]; then
-            echo "No metadata.json found; generating basic release body"
             echo "body<<EOF" >> $GITHUB_OUTPUT
             echo "Release for ${{ env.CHIP }} - No metadata found" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # 汇总信息
           devices_list=""
           declare -A kernels
           declare -A luci_apps_map
 
           while IFS= read -r mf; do
-            # jq may not be available in some runners; try to use jq if exists, else use crude parsing
             if command -v jq >/dev/null 2>&1; then
               repo=$(jq -r '.repo_short' "$mf")
               profile=$(jq -r '.profile' "$mf")
@@ -166,7 +161,6 @@ jobs:
               kernels["$kernel"]=1
             fi
 
-            # accumulate luci apps
             if [ -n "$luci" ]; then
               echo "$luci" | while IFS= read -r app; do
                 if [ -n "$app" ]; then
@@ -176,7 +170,6 @@ jobs:
             fi
           done <<< "$metadata_files"
 
-          # Build body
           BODY="Release for ${{ env.CHIP }}\n\nAuthor: Mary\n\nDevices:\n"
           BODY="${BODY}$(echo -e "$devices_list")\n"
           BODY="${BODY}\nKernel versions found:\n"
@@ -185,7 +178,6 @@ jobs:
           for a in "${!luci_apps_map[@]}"; do BODY="${BODY}- $a\n"; done
           BODY="${BODY}\nNotes: 默认管理地址: 192.168.111.1, 用户: root, 密码: none, 默认WIFI密码: 12345678\n"
 
-          # 输出为 step 输出
           echo "body<<EOF" >> $GITHUB_OUTPUT
           echo -e "$BODY" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT

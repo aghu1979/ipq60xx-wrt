@@ -1,3 +1,54 @@
+#!/bin/bash
+
+# 用户自定义脚本，用于加载第三方源和修改默认设置
+
+# 阶段1: 在 feeds update 之前执行
+pre_feeds() {
+    source scripts/build-helper.sh
+    log_info "执行 DIY: 加载第三方软件源..."
+    # 示例: 添加一个第三方 feed
+    # echo 'src-git custom_feed https://github.com/example/custom-feed.git' >> feeds.conf.default
+    log_success "第三方软件源加载完成。"
+}
+
+# 阶段2: 在 feeds install 之后，编译之前执行
+post_feeds() {
+    source scripts/build-helper.sh
+    log_info "执行 DIY: 修改默认路由器设置..."
+    
+    # 示例: 修改默认主机名
+    # sed -i 's/OpenWrt/MyRouter/g' package/base-files/files/etc/config/system
+    
+    # 示例: 修改默认 LAN IP
+    # sed -i 's/192.168.1.1/192.168.100.1/g' package/base-files/files/etc/config/network
+    
+    log_success "默认设置修改完成。"
+}
+
+# --- 主逻辑 ---
+COMMAND=${1:-all}
+
+# 在这里加载日志函数，以便在 diy.sh 中使用
+source "$(dirname "$0")/build-helper.sh"
+
+case "$COMMAND" in
+    pre-feeds)
+        pre_feeds
+        ;;
+    post-feeds)
+        post_feeds
+        ;;
+    all)
+        pre_feeds
+        post_feeds
+        ;;
+    *)
+        log_error "未知命令 '$COMMAND'"
+        echo "可用命令: pre-feeds, post-feeds, all"
+        exit 1
+        ;;
+esac
+
 #!/usr/bin/env bash
 # scripts/diy.sh - 在上游仓库目录下执行，添加/更新第三方包、修改默认配置等（已优化）
 #!/bin/bash

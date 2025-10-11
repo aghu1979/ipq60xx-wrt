@@ -200,14 +200,25 @@ list_third_party_packages() {
     local packages
     packages=$(find package/feeds -mindepth 1 -maxdepth 2 -type d -name "luci-app-*" -printf 'CONFIG_PACKAGE_%p=m\n' | sed 's|package/feeds/[^/]*/||' 2>/dev/null)
     
-    if [ -z "$packages" ]; then
-        log_warning "未找到任何第三方包" >&2
+    # 同时查找package目录下的第三方包
+    local more_packages
+    more_packages=$(find package -maxdepth 1 -type d -name "luci-app-*" -not -path "package/feeds/*" -printf 'CONFIG_PACKAGE_%p=m\n' 2>/dev/null)
+    
+    if [ -n "$packages" ] || [ -n "$more_packages" ]; then
+        if [ -n "$packages" ]; then
+            log_info "从package/feeds找到的第三方包:" >&2
+            echo "$packages" >&2
+        fi
+        if [ -n "$more_packages" ]; then
+            log_info "从package根目录找到的第三方包:" >&2
+            echo "$more_packages" >&2
+        fi
     else
-        log_info "找到的第三方包:" >&2
-        echo "$packages" >&2
+        log_warning "未找到任何第三方包" >&2
     fi
     
-    echo "$packages"
+    # 合并并返回所有包
+    echo -e "${packages}\n${more_packages}" | grep -v '^$'
 }
 
 # Git稀疏克隆函数

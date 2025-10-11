@@ -19,7 +19,7 @@ on:
         options: [ubuntu-24.04, ubuntu-22.04]
 
 env:
-  REPOS_CONFIG_FILE: 'repos.json'
+  REPOS_CONFIG_FILE: 'configs/repos.json'
   DEFAULT_CHIPSET: 'ipq60xx'
   PROFILES: '["Pro", "Max", "Ultra"]'
   FIRMWARE_TYPES: '["squashfs-factory.bin", "squashfs-sysupgrade.bin"]'

@@ -10,13 +10,13 @@ on:
         required: true
         default: 'ipq60xx'
         type: choice
-        options: [ipq60xx,]
+        options: [ipq60xx, x86-64, rockchip-armv8]
       ubuntu_version:
         description: '选择 Ubuntu 版本'
         required: true
-        default: 'ubuntu-22.04'
+        default: 'ubuntu-22.04'  # 修改默认版本为 ubuntu-22.04
         type: choice
-        options: [ubuntu-24.04, ubuntu-22.04]
+        options: [ubuntu-22.04, ubuntu-24.04]
   # 北京时间周五0点自动编译 (UTC时间周四16点)
   schedule:
     - cron: '0 16 * * 4'
@@ -49,67 +49,99 @@ jobs:
 
     - name: 设置脚本执行权限
       run: |
-        chmod +x ${{ env.SCRIPT_LIB }}
-        chmod +x ${{ env.SCRIPT_BUILD_HELPER }}
-        chmod +x ${{ env.SCRIPT_DIY }}
-        if [ -f "configs/repos.json" ]; then
-          chmod +x configs/repos.json
-        fi
+        chmod +x scripts/*.sh
+        chmod +x configs/*.json
 
-- name: 生成构建矩阵
-  id: set-matrix
-  run: |
-    # 加载函数库
-    source ${{ env.SCRIPT_LIB }}
-    
-    CHIPSET="${{ github.event.inputs.chipset || env.DEFAULT_CHIPSET }}"
-    echo "chipset=$CHIPSET" >> $GITHUB_OUTPUT
-    
-    BASE_CONFIG="configs/${CHIPSET}.base.config"
-    if [ ! -f "$BASE_CONFIG" ]; then 
-      log_error "基础配置文件 $BASE_CONFIG 不存在！"; 
-      exit 1; 
-    fi
-    
-    REPOS_JSON=$(cat ${{ env.REPOS_CONFIG_FILE }})
-    log_info "为芯片架构 $CHIPSET 生成设备矩阵..."
-    
-    # 使用build-helper脚本获取设备列表，并验证输出
-    DEVICE_JSON=$(${{ env.SCRIPT_BUILD_HELPER }} get-devices "$BASE_CONFIG")
-    log_info "获取到的设备列表: $DEVICE_JSON"
-    
-    # 验证JSON格式
-    if ! echo "$DEVICE_JSON" | jq . > /dev/null 2>&1; then
-      log_error "设备列表不是有效的JSON格式: $DEVICE_JSON"
-      exit 1
-    fi
-    
-    # 验证仓库配置JSON
-    if ! echo "$REPOS_JSON" | jq . > /dev/null 2>&1; then
-      log_error "仓库配置不是有效的JSON格式: $REPOS_JSON"
-      exit 1
-    fi
-    
-    # 生成构建矩阵
-    MATRIX=$(jq -n \
-      --argjson repos "$REPOS_JSON" \
-      --argjson devices "$DEVICE_JSON" \
-      --argjson profiles "$PROFILES" \
-      --arg chipset "$CHIPSET" \
-      '[$repos[] as $repo | $devices[] as $device | $profiles[] as $profile | {repo_name: $repo.name, repo_url: $repo.url, repo_branch: $repo.default_branch, chipset: $chipset, device: $device, profile: $profile}]')
-    
-    log_info "生成的构建矩阵: $MATRIX"
-    
-    # 验证矩阵JSON
-    if ! echo "$MATRIX" | jq . > /dev/null 2>&1; then
-      log_error "构建矩阵不是有效的JSON格式: $MATRIX"
-      exit 1
-    fi
-    
-    echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
-    echo "ubuntu=[\"${{ github.event.inputs.ubuntu_version || 'ubuntu-24.04' }}\"]" >> $GITHUB_OUTPUT
-    echo "tag=${CHIPSET}-$(date '+%Y%m%d')" >> $GITHUB_OUTPUT
-    log_success "矩阵和 Release Tag 生成完成。"
+    - name: 调试配置文件
+      run: |
+        # 加载函数库
+        source ${{ env.SCRIPT_LIB }}
+        
+        CHIPSET="${{ github.event.inputs.chipset || env.DEFAULT_CHIPSET }}"
+        BASE_CONFIG="configs/${CHIPSET}.base.config"
+        
+        log_info "当前工作目录: $(pwd)"
+        log_info "列出configs目录内容:"
+        ls -la configs/
+        
+        if [ -f "$BASE_CONFIG" ]; then
+          log_info "配置文件 $BASE_CONFIG 存在"
+          log_info "配置文件大小: $(wc -l < "$BASE_CONFIG") 行"
+          log_info "配置文件前20行:"
+          head -20 "$BASE_CONFIG"
+          
+          log_info "查找所有包含DEVICE的配置行:"
+          grep "DEVICE" "$BASE_CONFIG" || log_warning "未找到包含DEVICE的配置行"
+          
+          log_info "查找设备配置行 (正则匹配):"
+          grep -E "^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_[a-zA-Z0-9_-]+=y" "$BASE_CONFIG" || log_warning "未找到设备配置行"
+          
+          log_info "提取的设备名:"
+          grep -E "^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_[a-zA-Z0-9_-]+=y" "$BASE_CONFIG" | \
+            sed -E 's/^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_([a-zA-Z0-9_-]+)=y$/\2/' | \
+            sort -u || log_warning "未能提取到设备名"
+        else
+          log_error "配置文件 $BASE_CONFIG 不存在"
+          exit 1
+        fi
+        
+        log_info "仓库配置文件内容:"
+        cat ${{ env.REPOS_CONFIG_FILE }}
+
+    - name: 生成构建矩阵
+      id: set-matrix
+      run: |
+        # 加载函数库
+        source ${{ env.SCRIPT_LIB }}
+        
+        CHIPSET="${{ github.event.inputs.chipset || env.DEFAULT_CHIPSET }}"
+        echo "chipset=$CHIPSET" >> $GITHUB_OUTPUT
+        
+        BASE_CONFIG="configs/${CHIPSET}.base.config"
+        if [ ! -f "$BASE_CONFIG" ]; then 
+          log_error "基础配置文件 $BASE_CONFIG 不存在！"; 
+          exit 1; 
+        fi
+        
+        REPOS_JSON=$(cat ${{ env.REPOS_CONFIG_FILE }})
+        log_info "为芯片架构 $CHIPSET 生成设备矩阵..."
+        
+        # 使用build-helper脚本获取设备列表，并验证输出
+        DEVICE_JSON=$(${{ env.SCRIPT_BUILD_HELPER }} get-devices "$BASE_CONFIG")
+        log_info "获取到的设备列表: $DEVICE_JSON"
+        
+        # 验证JSON格式
+        if ! echo "$DEVICE_JSON" | jq . > /dev/null 2>&1; then
+          log_error "设备列表不是有效的JSON格式: $DEVICE_JSON"
+          exit 1
+        fi
+        
+        # 验证仓库配置JSON
+        if ! echo "$REPOS_JSON" | jq . > /dev/null 2>&1; then
+          log_error "仓库配置不是有效的JSON格式: $REPOS_JSON"
+          exit 1
+        fi
+        
+        # 生成构建矩阵
+        MATRIX=$(jq -n \
+          --argjson repos "$REPOS_JSON" \
+          --argjson devices "$DEVICE_JSON" \
+          --argjson profiles "$PROFILES" \
+          --arg chipset "$CHIPSET" \
+          '[$repos[] as $repo | $devices[] as $device | $profiles[] as $profile | {repo_name: $repo.name, repo_url: $repo.url, repo_branch: $repo.default_branch, chipset: $chipset, device: $device, profile: $profile}]')
+        
+        log_info "生成的构建矩阵: $MATRIX"
+        
+        # 验证矩阵JSON
+        if ! echo "$MATRIX" | jq . > /dev/null 2>&1; then
+          log_error "构建矩阵不是有效的JSON格式: $MATRIX"
+          exit 1
+        fi
+        
+        echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+        echo "ubuntu=[\"${{ github.event.inputs.ubuntu_version || 'ubuntu-22.04' }}\"]" >> $GITHUB_OUTPUT  # 修改默认版本
+        echo "tag=${CHIPSET}-$(date '+%Y%m%d')" >> $GITHUB_OUTPUT
+        log_success "矩阵和 Release Tag 生成完成。"
 
   prepare-third-party-cache:
     needs: generate-matrix
@@ -122,12 +154,8 @@ jobs:
 
     - name: 设置脚本执行权限
       run: |
-        chmod +x ${{ env.SCRIPT_LIB }}
-        chmod +x ${{ env.SCRIPT_BUILD_HELPER }}
-        chmod +x ${{ env.SCRIPT_DIY }}
-        if [ -f "configs/repos.json" ]; then
-          chmod +x configs/repos.json
-        fi
+        chmod +x scripts/*.sh
+        chmod +x configs/*.json
 
     - name: 初始化构建环境
       run: |
@@ -209,12 +237,8 @@ jobs:
 
     - name: 设置脚本执行权限
       run: |
-        chmod +x ${{ env.SCRIPT_LIB }}
-        chmod +x ${{ env.SCRIPT_BUILD_HELPER }}
-        chmod +x ${{ env.SCRIPT_DIY }}
-        if [ -f "configs/repos.json" ]; then
-          chmod +x configs/repos.json
-        fi
+        chmod +x scripts/*.sh
+        chmod +x configs/*.json
 
     - name: Cache ccache
       uses: actions/cache@v4
@@ -336,12 +360,8 @@ jobs:
 
     - name: 设置脚本执行权限
       run: |
-        chmod +x ${{ env.SCRIPT_LIB }}
-        chmod +x ${{ env.SCRIPT_BUILD_HELPER }}
-        chmod +x ${{ env.SCRIPT_DIY }}
-        if [ -f "configs/repos.json" ]; then
-          chmod +x configs/repos.json
-        fi
+        chmod +x scripts/*.sh
+        chmod +x configs/*.json
 
     - name: 下载所有构建产物
       uses: actions/download-artifact@v4
@@ -377,12 +397,8 @@ jobs:
 
     - name: 设置脚本执行权限
       run: |
-        chmod +x ${{ env.SCRIPT_LIB }}
-        chmod +x ${{ env.SCRIPT_BUILD_HELPER }}
-        chmod +x ${{ env.SCRIPT_DIY }}
-        if [ -f "configs/repos.json" ]; then
-          chmod +x configs/repos.json
-        fi
+        chmod +x scripts/*.sh
+        chmod +x configs/*.json
 
     - name: 更新构建状态徽章
       run: |
@@ -420,12 +436,8 @@ jobs:
 
     - name: 设置脚本执行权限
       run: |
-        chmod +x ${{ env.SCRIPT_LIB }}
-        chmod +x ${{ env.SCRIPT_BUILD_HELPER }}
-        chmod +x ${{ env.SCRIPT_DIY }}
-        if [ -f "configs/repos.json" ]; then
-          chmod +x configs/repos.json
-        fi
+        chmod +x scripts/*.sh
+        chmod +x configs/*.json
 
     - name: 记录构建统计
       run: |

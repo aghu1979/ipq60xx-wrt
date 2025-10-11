@@ -241,6 +241,26 @@ jobs:
           log_info "更新和安装 Feeds..."
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+          
+          # 检查feeds安装结果
+          log_info "=== Feeds安装后检查 ==="
+          if [ -d "package/feeds" ]; then
+            log_info "package/feeds目录内容:"
+            ls -la package/feeds/
+            
+            # 统计各类型包的数量
+            log_info "=== 包统计 ==="
+            for feed_dir in package/feeds/*/; do
+              if [ -d "$feed_dir" ]; then
+                feed_name=$(basename "$feed_dir")
+                package_count=$(find "$feed_dir" -name "Makefile" | wc -l)
+                luci_count=$(find "$feed_dir" -name "luci-app-*" -type d | wc -l)
+                log_info "$feed_name: 总包数=$package_count, luci-app数量=$luci_count"
+              fi
+            done
+          else
+            log_error "package/feeds目录不存在"
+          fi
 
       - name: 调试Feeds安装
         run: |
@@ -399,6 +419,26 @@ jobs:
           log_info "更新和安装 Feeds..."
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+          
+          # 检查feeds安装结果
+          log_info "=== Feeds安装后检查 ==="
+          if [ -d "package/feeds" ]; then
+            log_info "package/feeds目录内容:"
+            ls -la package/feeds/
+            
+            # 统计各类型包的数量
+            log_info "=== 包统计 ==="
+            for feed_dir in package/feeds/*/; do
+              if [ -d "$feed_dir" ]; then
+                feed_name=$(basename "$feed_dir")
+                package_count=$(find "$feed_dir" -name "Makefile" | wc -l)
+                luci_count=$(find "$feed_dir" -name "luci-app-*" -type d | wc -l)
+                log_info "$feed_name: 总包数=$package_count, luci-app数量=$luci_count"
+              fi
+            done
+          else
+            log_error "package/feeds目录不存在"
+          fi
 
       - name: 执行 DIY (第二阶段)
         run: |

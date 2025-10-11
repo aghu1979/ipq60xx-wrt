@@ -56,31 +56,60 @@ jobs:
           chmod +x configs/repos.json
         fi
 
-    - name: 生成构建矩阵
-      id: set-matrix
-      run: |
-        # 加载函数库
-        source ${{ env.SCRIPT_LIB }}
-        
-        CHIPSET="${{ github.event.inputs.chipset || env.DEFAULT_CHIPSET }}"
-        echo "chipset=$CHIPSET" >> $GITHUB_OUTPUT
-        
-        BASE_CONFIG="configs/${CHIPSET}.base.config"
-        if [ ! -f "$BASE_CONFIG" ]; then 
-          log_error "基础配置文件 $BASE_CONFIG 不存在！"; 
-          exit 1; 
-        fi
-        
-        REPOS_JSON=$(cat ${{ env.REPOS_CONFIG_FILE }})
-        log_info "为芯片架构 $CHIPSET 生成设备矩阵..."
-        
-        # 使用build-helper脚本获取设备列表
-        DEVICE_JSON=$(${{ env.SCRIPT_BUILD_HELPER }} get-devices "$BASE_CONFIG")
-        MATRIX=$(jq -n --argjson repos "$REPOS_JSON" --argjson devices "$DEVICE_JSON" --argjson profiles "$PROFILES" --arg chipset "$CHIPSET" '[$repos[] as $repo | $devices[] as $device | $profiles[] as $profile | {repo_name: $repo.name, repo_url: $repo.url, repo_branch: $repo.default_branch, chipset: $chipset, device: $device, profile: $profile}]')
-        echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
-        echo "ubuntu=[\"${{ github.event.inputs.ubuntu_version || 'ubuntu-24.04' }}\"]" >> $GITHUB_OUTPUT
-        echo "tag=${CHIPSET}-$(date '+%Y%m%d')" >> $GITHUB_OUTPUT
-        log_success "矩阵和 Release Tag 生成完成。"
+- name: 生成构建矩阵
+  id: set-matrix
+  run: |
+    # 加载函数库
+    source ${{ env.SCRIPT_LIB }}
+    
+    CHIPSET="${{ github.event.inputs.chipset || env.DEFAULT_CHIPSET }}"
+    echo "chipset=$CHIPSET" >> $GITHUB_OUTPUT
+    
+    BASE_CONFIG="configs/${CHIPSET}.base.config"
+    if [ ! -f "$BASE_CONFIG" ]; then 
+      log_error "基础配置文件 $BASE_CONFIG 不存在！"; 
+      exit 1; 
+    fi
+    
+    REPOS_JSON=$(cat ${{ env.REPOS_CONFIG_FILE }})
+    log_info "为芯片架构 $CHIPSET 生成设备矩阵..."
+    
+    # 使用build-helper脚本获取设备列表，并验证输出
+    DEVICE_JSON=$(${{ env.SCRIPT_BUILD_HELPER }} get-devices "$BASE_CONFIG")
+    log_info "获取到的设备列表: $DEVICE_JSON"
+    
+    # 验证JSON格式
+    if ! echo "$DEVICE_JSON" | jq . > /dev/null 2>&1; then
+      log_error "设备列表不是有效的JSON格式: $DEVICE_JSON"
+      exit 1
+    fi
+    
+    # 验证仓库配置JSON
+    if ! echo "$REPOS_JSON" | jq . > /dev/null 2>&1; then
+      log_error "仓库配置不是有效的JSON格式: $REPOS_JSON"
+      exit 1
+    fi
+    
+    # 生成构建矩阵
+    MATRIX=$(jq -n \
+      --argjson repos "$REPOS_JSON" \
+      --argjson devices "$DEVICE_JSON" \
+      --argjson profiles "$PROFILES" \
+      --arg chipset "$CHIPSET" \
+      '[$repos[] as $repo | $devices[] as $device | $profiles[] as $profile | {repo_name: $repo.name, repo_url: $repo.url, repo_branch: $repo.default_branch, chipset: $chipset, device: $device, profile: $profile}]')
+    
+    log_info "生成的构建矩阵: $MATRIX"
+    
+    # 验证矩阵JSON
+    if ! echo "$MATRIX" | jq . > /dev/null 2>&1; then
+      log_error "构建矩阵不是有效的JSON格式: $MATRIX"
+      exit 1
+    fi
+    
+    echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+    echo "ubuntu=[\"${{ github.event.inputs.ubuntu_version || 'ubuntu-24.04' }}\"]" >> $GITHUB_OUTPUT
+    echo "tag=${CHIPSET}-$(date '+%Y%m%d')" >> $GITHUB_OUTPUT
+    log_success "矩阵和 Release Tag 生成完成。"
 
   prepare-third-party-cache:
     needs: generate-matrix

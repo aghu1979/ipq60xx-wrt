@@ -7,7 +7,9 @@ on:
         description: '选择运行器（ubuntu-22.04 或 ubuntu-24.04）'
         required: false
         default: 'ubuntu-22.04'
-  # 也可按需添加 push/cron 触发
+  # 定时触发：北京时间每周五 00:00（UTC 为前一天 16:00）
+  schedule:
+    - cron: '0 16 * * 4'
 
 permissions:
   contents: write
@@ -50,7 +52,6 @@ jobs:
           echo "Repo: ${{ matrix.repo_short }}"
           echo "Upstream: ${{ matrix.repo_url }} @ ${matrix.repo_branch}"
 
-      # 针对常用缓存分别设置 actions/cache（dl, toolchain, feeds, ccache, staging_dir）
       - name: Cache: dl
         uses: actions/cache@v4
         with:
@@ -111,7 +112,7 @@ jobs:
           LOG_DIR: ${{ env.LOG_DIR }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          chmod +x ./scripts/build.sh
+          chmod +x ./scripts/build.sh ./scripts/script.sh || true
           ./scripts/build.sh
 
       - name: 收集产物并创建 Release

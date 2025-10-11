@@ -16,13 +16,17 @@ on:
         required: true
         default: 'ubuntu-22.04'
         type: choice
-        options: [ubuntu-24.04, ubuntu-22.04]
+        options: [ubuntu-22.04, ubuntu-24.04]
 
 env:
+  # --- 仓库配置 ---
+  # --- 唯一修改：更新了 repos.json 的路径 ---
   REPOS_CONFIG_FILE: 'configs/repos.json'
+  # --- 构建配置 ---
   DEFAULT_CHIPSET: 'ipq60xx'
   PROFILES: '["Pro", "Max", "Ultra"]'
   FIRMWARE_TYPES: '["squashfs-factory.bin", "squashfs-sysupgrade.bin"]'
+  # --- 依赖和脚本 ---
   DEPENDS_SCRIPT_URL: 'git.io/depends-ubuntu-2204'
   SCRIPT_DIY: 'scripts/diy.sh'
   SCRIPT_BUILD: 'scripts/build-helper.sh'
@@ -51,7 +55,7 @@ jobs:
         if [ ! -f "$BASE_CONFIG" ]; then log_error "基础配置文件 $BASE_CONFIG 不存在！"; exit 1; fi
         REPOS_JSON=$(cat ${{ env.REPOS_CONFIG_FILE }})
         log_info "为芯片架构 $CHIPSET 生成设备矩阵..."
-        DEVICE_JSON=$(./${{ env.SCRIPT_BUILD }} get-devices "$BASE_CONFIG"
+        DEVICE_JSON=$(./${{ env.SCRIPT_BUILD }} get-devices "$BASE_CONFIG")
         MATRIX=$(jq -n --argjson repos "$REPOS_JSON" --argjson devices "$DEVICE_JSON" --argjson profiles "$PROFILES" --arg chipset "$CHIPSET" '[$repos[] as $repo | $devices[] as $device | $profiles[] as $profile | {repo_name: $repo.name, repo_url: $repo.url, repo_branch: $repo.default_branch, chipset: $chipset, device: $device, profile: $profile}]')
         echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
         echo "ubuntu=[\"${{ github.event.inputs.ubuntu_version || 'ubuntu-24.04' }}\"]" >> $GITHUB_OUTPUT
@@ -86,7 +90,6 @@ jobs:
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
-
 
     - name: 克隆基础源码
       run: |
@@ -155,6 +158,14 @@ jobs:
     - name: 检出代码
       uses: actions/checkout@v4
 
+    - name: Cache ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.ccache
+        key: ccache-${{ matrix.chipset }}-${{ runner.os }}-$(sha256sum ${{ env.SCRIPT_DIY }} | cut -d' ' -f1)
+        restore-keys: |
+          ccache-${{ matrix.chipset }}-${{ runner.os }}-
+
     - name: 初始化构建环境
       run: |
         # source ${{ env.SCRIPT_BUILD }}
@@ -177,7 +188,6 @@ jobs:
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
-
 
     - name: 执行 DIY (第一阶段)
       run: |
@@ -231,7 +241,8 @@ jobs:
       run: |
         source ${{ env.SCRIPT_BUILD }}
         cd openwrt
-        log_info "开始编译固件... (大部分第三方包已缓存)"
+        log_info "开始编译固件... (大部分第三方包已缓存，并启用 ccache 加速)"
+        export CCACHE_DIR=~/.ccache
         make -j$(nproc) || make -j1 V=s 2>&1 | tee -a "$LOG_FILE"
         log_success "固件编译完成。"
 

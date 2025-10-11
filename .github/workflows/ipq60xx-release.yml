@@ -26,7 +26,7 @@ env:
 jobs:
   build:
     name: "编译: ${{ matrix.repo_short }}"
-    runs-on: ${{ (github.event.inputs.runner != '' && github.event.inputs.runner) || 'ubuntu-22.04' }}
+    runs-on: ${{ github.event.inputs.runner || 'ubuntu-22.04' }}
     strategy:
       matrix:
         include:
@@ -41,18 +41,18 @@ jobs:
             repo_short: libwrt
 
     steps:
-      - name: Checkout 当前仓库（包含 configs 与 scripts）
+      - name: "Checkout 当前仓库（包含 configs 与 scripts）"
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: 显示输入参数
+      - name: "显示输入参数"
         run: |
           echo "Runner: ${{ github.event.inputs.runner }}"
           echo "Repo: ${{ matrix.repo_short }}"
           echo "Upstream: ${{ matrix.repo_url }} @ ${{ matrix.repo_branch }}"
 
-      - name: Cache: dl
+      - name: 'Cache: dl'
         uses: actions/cache@v4
         with:
           path: |
@@ -63,7 +63,7 @@ jobs:
           restore-keys: |
             ${{ matrix.repo_short }}-${{ env.CHIP }}-dl-${{ env.CACHE_VERSION }}-
 
-      - name: Cache: toolchain
+      - name: 'Cache: toolchain'
         uses: actions/cache@v4
         with:
           path: |
@@ -74,7 +74,7 @@ jobs:
           restore-keys: |
             ${{ matrix.repo_short }}-${{ env.CHIP }}-toolchain-${{ env.CACHE_VERSION }}-
 
-      - name: Cache: feeds & packages
+      - name: 'Cache: feeds & packages'
         uses: actions/cache@v4
         with:
           path: |
@@ -85,7 +85,7 @@ jobs:
           restore-keys: |
             ${{ matrix.repo_short }}-${{ env.CHIP }}-feeds-${{ env.CACHE_VERSION }}-
 
-      - name: Cache: ccache
+      - name: 'Cache: ccache'
         uses: actions/cache@v4
         with:
           path: |
@@ -95,13 +95,13 @@ jobs:
           restore-keys: |
             ${{ matrix.repo_short }}-${{ env.CHIP }}-ccache-${{ env.CACHE_VERSION }}-
 
-      - name: 准备环境 (安装必要工具)
+      - name: "准备环境 (安装必要工具)"
         run: |
           sudo apt-get update -y
           sudo apt-get install -y build-essential ccache unzip gzip bsdmainutils python3-pip pv rsync
           pip3 --version || true
 
-      - name: 运行编译脚本（主流程）
+      - name: "运行编译脚本（主流程）"
         env:
           REPO_URL: ${{ matrix.repo_url }}
           REPO_BRANCH: ${{ matrix.repo_branch }}
@@ -115,11 +115,10 @@ jobs:
           chmod +x ./scripts/build.sh ./scripts/script.sh || true
           ./scripts/build.sh
 
-      - name: 收集产物并创建 Release
+      - name: "收集产物并创建 Release"
         id: release
         uses: softprops/action-gh-release@v1
         with:
-          # 使用稳定的 tag 名称（用 run id 与芯片）
           tag_name: ${{ format('{0}-{1}', github.run_id, env.CHIP) }}
           name: ${{ format('build-{0}-{1}', github.run_id, env.CHIP) }}
           files: |

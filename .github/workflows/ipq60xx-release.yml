@@ -1,0 +1,126 @@
+name: ipq60xx-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: '选择运行器（ubuntu-22.04 或 ubuntu-24.04）'
+        required: false
+        default: 'ubuntu-22.04'
+  # 也可按需添加 push/cron 触发
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CHIP: ipq60xx
+  CONFIGS_DIR: configs
+  ARTIFACT_DIR: artifacts
+  LOG_DIR: logs
+  CACHE_VERSION: 'v1'  # 如需强制清理缓存可以改此字段
+  BUILD_ORDER: "Ultra Max Pro"
+
+jobs:
+  build:
+    name: 编译: ${{ matrix.repo_short }}
+    runs-on: ${{ github.event.inputs.runner || 'ubuntu-22.04' }}
+    strategy:
+      matrix:
+        include:
+          - repo_url: https://github.com/laipeng668/immortalwrt.git
+            repo_branch: master
+            repo_short: immwrt
+          - repo_url: https://github.com/laipeng668/openwrt.git
+            repo_branch: master
+            repo_short: openwrt
+          - repo_url: https://github.com/laipeng668/openwrt-6.x.git
+            repo_branch: k6.12-nss
+            repo_short: libwrt
+
+    steps:
+      - name: Checkout 当前仓库（包含 configs 与 scripts）
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: 显示输入参数
+        run: |
+          echo "Runner: ${{ github.event.inputs.runner }}"
+          echo "Repo: ${{ matrix.repo_short }}"
+          echo "Upstream: ${{ matrix.repo_url }} @ ${matrix.repo_branch}"
+
+      # 针对常用缓存分别设置 actions/cache（dl, toolchain, feeds, ccache, staging_dir）
+      - name: Cache: dl
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/downloads
+            dl
+            download
+          key: ${{ matrix.repo_short }}-${{ env.CHIP }}-dl-${{ env.CACHE_VERSION }}-${{ hashFiles('configs/**') }}
+          restore-keys: |
+            ${{ matrix.repo_short }}-${{ env.CHIP }}-dl-${{ env.CACHE_VERSION }}-
+
+      - name: Cache: toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            toolchain
+            staging_dir/toolchain-*
+            .toolchain
+          key: ${{ matrix.repo_short }}-${{ env.CHIP }}-toolchain-${{ env.CACHE_VERSION }}-${{ hashFiles('configs/**') }}
+          restore-keys: |
+            ${{ matrix.repo_short }}-${{ env.CHIP }}-toolchain-${{ env.CACHE_VERSION }}-
+
+      - name: Cache: feeds & packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            feeds
+            feeds/*/dl
+            package/*/dl
+          key: ${{ matrix.repo_short }}-${{ env.CHIP }}-feeds-${{ env.CACHE_VERSION }}-${{ hashFiles('configs/**') }}
+          restore-keys: |
+            ${{ matrix.repo_short }}-${{ env.CHIP }}-feeds-${{ env.CACHE_VERSION }}-
+
+      - name: Cache: ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ccache
+            ~/.ccache
+          key: ${{ matrix.repo_short }}-${{ env.CHIP }}-ccache-${{ env.CACHE_VERSION }}-${{ hashFiles('configs/**') }}
+          restore-keys: |
+            ${{ matrix.repo_short }}-${{ env.CHIP }}-ccache-${{ env.CACHE_VERSION }}-
+
+      - name: 准备环境 (安装必要工具)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential ccache unzip gzip bsdmainutils python3-pip pv rsync
+          pip3 --version || true
+
+      - name: 运行编译脚本（主流程）
+        env:
+          REPO_URL: ${{ matrix.repo_url }}
+          REPO_BRANCH: ${{ matrix.repo_branch }}
+          REPO_SHORT: ${{ matrix.repo_short }}
+          CHIP: ${{ env.CHIP }}
+          CONFIGS_DIR: ${{ env.CONFIGS_DIR }}
+          ARTIFACT_DIR: ${{ env.ARTIFACT_DIR }}
+          LOG_DIR: ${{ env.LOG_DIR }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          chmod +x ./scripts/build.sh
+          ./scripts/build.sh
+
+      - name: 收集产物并创建 Release
+        id: release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.create_tag.outputs.tag_name || format('{0}-{1}', github.run_id, env.CHIP) }}
+          name: ${{ format('build-{0}-{1}', github.run_id, env.CHIP) }}
+          files: |
+            artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

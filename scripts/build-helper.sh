@@ -19,7 +19,7 @@ show_help() {
     echo "可用命令:" >&2
     echo "  get-devices <config_file>     从配置文件提取设备列表" >&2
     echo "  select-device <config_file> <device_name> <chipset>  选择设备配置" >&2
-    echo "  generate-notes <manifest_file> <output_file>  生成 Release Notes" >&2
+    echo "  generate-notes <manifest_file> <output_file> 生成 Release Notes" >&2
     echo "  list-third-party-packages     列出第三方包" >&2
     echo "  help                          显示此帮助信息" >&2
     echo "" >&2

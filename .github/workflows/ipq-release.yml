@@ -67,19 +67,33 @@ jobs:
           if [ -f "$BASE_CONFIG" ]; then
             log_info "配置文件 $BASE_CONFIG 存在"
             log_info "配置文件大小: $(wc -l < "$BASE_CONFIG") 行"
-            log_info "配置文件前20行:"
-            head -20 "$BASE_CONFIG"
+            log_info "配置文件前30行:"
+            head -30 "$BASE_CONFIG"
             
             log_info "查找所有包含DEVICE的配置行:"
-            grep "DEVICE" "$BASE_CONFIG" || log_warning "未找到包含DEVICE的配置行"
+            grep -n "DEVICE" "$BASE_CONFIG" || log_warning "未找到包含DEVICE的配置行"
+            
+            log_info "查找所有包含TARGET的配置行:"
+            grep -n "TARGET" "$BASE_CONFIG" | head -20 || log_warning "未找到包含TARGET的配置行"
+            
+            log_info "查找所有=y的配置行:"
+            grep -n "=y" "$BASE_CONFIG" | head -20 || log_warning "未找到=y的配置行"
             
             log_info "查找设备配置行 (正则匹配):"
-            grep -E "^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_[a-zA-Z0-9_-]+=y" "$BASE_CONFIG" || log_warning "未找到设备配置行"
+            grep -n -E "^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_[a-zA-Z0-9_-]+=y" "$BASE_CONFIG" || log_warning "未找到设备配置行"
+            
+            log_info "尝试更宽松的匹配:"
+            grep -n -E "CONFIG_TARGET.*DEVICE.*=y" "$BASE_CONFIG" || log_warning "未找到宽松匹配的设备配置行"
             
             log_info "提取的设备名:"
             grep -E "^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_[a-zA-Z0-9_-]+=y" "$BASE_CONFIG" | \
               sed -E 's/^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_([a-zA-Z0-9_-]+)=y$/\2/' | \
               sort -u || log_warning "未能提取到设备名"
+            
+            log_info "使用宽松匹配提取的设备名:"
+            grep -E "CONFIG_TARGET.*DEVICE.*=y" "$BASE_CONFIG" | \
+              sed -E 's/^.*DEVICE_([a-zA-Z0-9_-]+)=y$/\1/' | \
+              sort -u || log_warning "宽松匹配未能提取到设备名"
           else
             log_error "配置文件 $BASE_CONFIG 不存在"
             exit 1
@@ -87,6 +101,38 @@ jobs:
           
           log_info "仓库配置文件内容:"
           cat ${{ env.REPOS_CONFIG_FILE }}
+
+      - name: 独立调试设备提取
+        run: |
+          # 加载函数库
+          source ${{ env.SCRIPT_LIB }}
+          
+          CHIPSET="${{ github.event.inputs.chipset || env.DEFAULT_CHIPSET }}"
+          BASE_CONFIG="configs/${CHIPSET}.base.config"
+          
+          log_info "=== 独立调试设备提取 ==="
+          
+          # 直接测试脚本
+          log_info "直接测试 get-devices 命令:"
+          ${{ env.SCRIPT_BUILD_HELPER }} get-devices "$BASE_CONFIG"
+          
+          log_info "=== 测试不同的正则表达式 ==="
+          
+          # 测试原始正则
+          log_info "测试原始正则:"
+          grep -E "^CONFIG_TARGET(_DEVICE)?_[a-zA-Z0-9_]+_DEVICE_[a-zA-Z0-9_-]+=y" "$BASE_CONFIG" || log_warning "原始正则无匹配"
+          
+          # 测试宽松正则
+          log_info "测试宽松正则:"
+          grep -E "CONFIG_TARGET.*DEVICE.*=y" "$BASE_CONFIG" || log_warning "宽松正则无匹配"
+          
+          # 测试简单正则
+          log_info "测试简单正则:"
+          grep -E "DEVICE_[a-zA-Z0-9_-]+=" "$BASE_CONFIG" || log_warning "简单正则无匹配"
+          
+          # 显示所有包含=y的行
+          log_info "所有包含=y的行:"
+          grep "=y" "$BASE_CONFIG" | head -10 || log_warning "未找到=y的行"
 
       - name: 生成构建矩阵
         id: set-matrix
@@ -109,6 +155,12 @@ jobs:
           # 使用build-helper脚本获取设备列表，分离stdout和stderr
           DEVICE_JSON=$(${{ env.SCRIPT_BUILD_HELPER }} get-devices "$BASE_CONFIG" 2>/dev/null)
           log_info "获取到的设备列表: $DEVICE_JSON"
+          
+          # 如果设备列表为空，使用默认设备列表
+          if [ "$DEVICE_JSON" = "[]" ]; then
+            log_warning "设备列表为空，使用默认设备列表"
+            DEVICE_JSON='["jdcloud_re-ss-01", "jdcloud_re-cs-02"]'
+          fi
           
           # 验证JSON格式
           if ! echo "$DEVICE_JSON" | jq . > /dev/null 2>&1; then

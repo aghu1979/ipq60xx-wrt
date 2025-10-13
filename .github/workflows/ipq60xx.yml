@@ -52,6 +52,52 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          # 确保检出所有文件和历史
+          fetch-depth: 0
+          # 确保检出所有分支
+          fetch-tags: true
+
+      - name: 验证配置文件存在
+        run: |
+          echo "🔍 验证配置文件存在..."
+          # 切换到仓库根目录
+          cd ${{ github.workspace }}
+          
+          # 列出所有文件和目录
+          echo "当前目录内容："
+          ls -la
+          
+          # 检查configs目录
+          if [ -d "configs" ]; then
+            echo "configs目录存在，内容："
+            ls -la configs/
+          else
+            echo "❌ configs目录不存在"
+            exit 1
+          fi
+          
+          # 检查具体配置文件
+          if [ -f "configs/base_ipq60xx.config" ]; then
+            echo "✅ configs/base_ipq60xx.config 存在"
+          else
+            echo "❌ configs/base_ipq60xx.config 不存在"
+            exit 1
+          fi
+          
+          if [ -f "configs/base_immwrt.config" ]; then
+            echo "✅ configs/base_immwrt.config 存在"
+          else
+            echo "❌ configs/base_immwrt.config 不存在"
+            exit 1
+          fi
+          
+          if [ -f "configs/Ultra.config" ]; then
+            echo "✅ configs/Ultra.config 存在"
+          else
+            echo "❌ configs/Ultra.config 不存在"
+            exit 1
+          fi
 
       - name: 创建目录结构
         run: |
@@ -70,6 +116,21 @@ jobs:
           cd ${{ env.OPENWRT_PATH }}
           git checkout master
           echo "✅ immortalwrt源码下载完成"
+
+      - name: 复制配置文件到源码目录
+        run: |
+          echo "📋 复制配置文件到源码目录..."
+          # 确保配置文件在源码目录中可用
+          cp -r ${{ github.workspace }}/configs ${{ env.OPENWRT_PATH }}/
+          
+          # 验证复制是否成功
+          cd ${{ env.OPENWRT_PATH }}
+          if [ -f "configs/base_ipq60xx.config" ]; then
+            echo "✅ 配置文件复制成功"
+          else
+            echo "❌ 配置文件复制失败"
+            exit 1
+          fi
 
       - name: 生成缓存键
         id: cache-keys
@@ -128,6 +189,11 @@ jobs:
         run: |
           echo "⚙️ 配置immortalwrt的Ultra编译环境（用于完整luci缓存）..."
           cd ${{ env.OPENWRT_PATH }}
+          
+          # 验证当前目录和配置文件
+          echo "当前工作目录: $(pwd)"
+          echo "configs目录内容:"
+          ls -la configs/
           
           # 合并完整Ultra配置
           cat configs/base_ipq60xx.config > .config
@@ -243,6 +309,30 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          # 确保检出所有文件和历史
+          fetch-depth: 0
+          # 确保检出所有分支
+          fetch-tags: true
+
+      - name: 验证配置文件存在
+        run: |
+          echo "🔍 验证配置文件存在..."
+          # 切换到仓库根目录
+          cd ${{ github.workspace }}
+          
+          # 列出所有文件和目录
+          echo "当前目录内容："
+          ls -la
+          
+          # 检查configs目录
+          if [ -d "configs" ]; then
+            echo "configs目录存在，内容："
+            ls -la configs/
+          else
+            echo "❌ configs目录不存在"
+            exit 1
+          fi
 
       - name: 设置环境变量
         id: set-env
@@ -341,6 +431,22 @@ jobs:
           git checkout ${{ env.BRANCH_NAME }}
           echo "✅ 源码下载完成"
 
+      - name: 复制配置文件到源码目录
+        if: steps.restore-cache-base.outputs.cache-hit != 'true'
+        run: |
+          echo "📋 复制配置文件到源码目录..."
+          # 确保配置文件在源码目录中可用
+          cp -r ${{ github.workspace }}/configs ${{ env.OPENWRT_PATH }}/
+          
+          # 验证复制是否成功
+          cd ${{ env.OPENWRT_PATH }}
+          if [ -f "configs/base_ipq60xx.config" ]; then
+            echo "✅ 配置文件复制成功"
+          else
+            echo "❌ 配置文件复制失败"
+            exit 1
+          fi
+
       - name: 恢复Ultra luci缓存和通用缓存
         run: |
           echo "🔄 恢复Ultra luci缓存和通用缓存..."
@@ -362,6 +468,11 @@ jobs:
         run: |
           echo "🔧 开始合并基础配置文件..."
           cd ${{ env.OPENWRT_PATH }}
+          
+          # 验证当前目录和配置文件
+          echo "当前工作目录: $(pwd)"
+          echo "configs目录内容:"
+          ls -la configs/
           
           # 合并基础配置文件（不包含Pro/Max/Ultra）
           cat configs/base_ipq60xx.config > .config
@@ -464,6 +575,11 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          # 确保检出所有文件和历史
+          fetch-depth: 0
+          # 确保检出所有分支
+          fetch-tags: true
 
       - name: 设置环境变量
         run: |
@@ -574,6 +690,11 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          # 确保检出所有文件和历史
+          fetch-depth: 0
+          # 确保检出所有分支
+          fetch-tags: true
 
       - name: 设置环境变量
         run: |
@@ -742,6 +863,11 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          # 确保检出所有文件和历史
+          fetch-depth: 0
+          # 确保检出所有分支
+          fetch-tags: true
 
       - name: 设置环境变量
         run: |
@@ -910,6 +1036,11 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          # 确保检出所有文件和历史
+          fetch-depth: 0
+          # 确保检出所有分支
+          fetch-tags: true
 
       - name: 设置环境变量
         run: |
@@ -1074,6 +1205,11 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          # 确保检出所有文件和历史
+          fetch-depth: 0
+          # 确保检出所有分支
+          fetch-tags: true
 
       - name: 设置环境变量
         run: |

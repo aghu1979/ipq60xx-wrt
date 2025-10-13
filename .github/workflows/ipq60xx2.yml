@@ -1,4 +1,4 @@
-name: OpenWrt 高效分步式固件编译2
+name: OpenWrt 高效分步式固件编译
 
 on:
   workflow_dispatch:
@@ -242,6 +242,12 @@ jobs:
             echo ""
             echo "=== Ultra.config ==="
             cat configs/Ultra.config
+            echo ""
+            echo "检查.config文件大小:"
+            wc -l .config
+            echo ""
+            echo "检查.config文件中所有PACKAGE配置:"
+            grep "^CONFIG_PACKAGE" .config | head -20
             echo ""
             echo "终止编译过程以避免后续错误"
             exit 1
@@ -671,9 +677,13 @@ jobs:
           echo "🛠️ 运行DIY脚本..."
           cd ${{ env.OPENWRT_PATH }}
           # DIY脚本用于自定义修改源码
-          chmod +x scripts/diy.sh
-          ./scripts/diy.sh ${{ env.OPENWRT_PATH }}
-          echo "✅ DIY脚本执行完成"
+          if [ -f "scripts/diy.sh" ]; then
+            chmod +x scripts/diy.sh
+            ./scripts/diy.sh ${{ env.OPENWRT_PATH }}
+            echo "✅ DIY脚本执行完成"
+          else
+            echo "⚠️ DIY脚本不存在，跳过"
+          fi
 
       - name: 更新 feeds
         if: steps.restore-cache-base.outputs.cache-hit != 'true'
@@ -1210,7 +1220,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.source_repo }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Max
-          path: ${{ env.TEMP_DIR }}/max/${{ matrix.source_repo }}/${{ matrix.device }}
+         路径: ${{ env.TEMP_DIR }}/max/${{ matrix.source_repo }}/${{ matrix.device }}
           retention-days: 7
 
   # Ultra配置编译阶段（设备级别）- 依赖sync-cache

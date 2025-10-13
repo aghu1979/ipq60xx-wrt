@@ -431,10 +431,9 @@ jobs:
           echo "✅ 源码下载完成"
 
       - name: 复制配置文件到源码目录
-        if: steps.restore-cache-base.outputs.cache-hit != 'true'
         run: |
           echo "📋 复制配置文件到源码目录..."
-          # 确保配置文件在源码目录中可用
+          # 确保配置文件在源码目录中可用（无论缓存是否命中）
           cp -r ${{ github.workspace }}/configs ${{ env.OPENWRT_PATH }}/
           
           # 验证复制是否成功
@@ -599,6 +598,21 @@ jobs:
             ${{ env.TEMP_DIR }}
           key: ${{ needs.prepare.outputs.cache-key-base }}
 
+      - name: 复制配置文件到源码目录
+        run: |
+          echo "📋 复制配置文件到源码目录..."
+          # 确保配置文件在源码目录中可用（无论缓存是否命中）
+          cp -r ${{ github.workspace }}/configs ${{ env.OPENWRT_PATH }}/
+          
+          # 验证复制是否成功
+          cd ${{ env.OPENWRT_PATH }}
+          if [ -f "configs/base_ipq60xx.config" ]; then
+            echo "✅ 配置文件复制成功"
+          else
+            echo "❌ 配置文件复制失败"
+            exit 1
+          fi
+
       - name: 创建目录结构
         run: |
           # 创建必要的目录结构
@@ -729,6 +743,21 @@ jobs:
             ${{ env.OPENWRT_PATH }}
             ${{ env.TEMP_DIR }}
           key: ${{ needs.prepare.outputs.cache-key-base }}
+
+      - name: 复制配置文件到源码目录
+        run: |
+          echo "📋 复制配置文件到源码目录..."
+          # 确保配置文件在源码目录中可用（无论缓存是否命中）
+          cp -r ${{ github.workspace }}/configs ${{ env.OPENWRT_PATH }}/
+          
+          # 验证复制是否成功
+          cd ${{ env.OPENWRT_PATH }}
+          if [ -f "configs/base_ipq60xx.config" ]; then
+            echo "✅ 配置文件复制成功"
+          else
+            echo "❌ 配置文件复制失败"
+            exit 1
+          fi
 
       - name: 恢复Ultra luci缓存和ccache
         run: |
@@ -903,6 +932,21 @@ jobs:
             ${{ env.TEMP_DIR }}
           key: ${{ needs.prepare.outputs.cache-key-base }}
 
+      - name: 复制配置文件到源码目录
+        run: |
+          echo "📋 复制配置文件到源码目录..."
+          # 确保配置文件在源码目录中可用（无论缓存是否命中）
+          cp -r ${{ github.workspace }}/configs ${{ env.OPENWRT_PATH }}/
+          
+          # 验证复制是否成功
+          cd ${{ env.OPENWRT_PATH }}
+          if [ -f "configs/base_ipq60xx.config" ]; then
+            echo "✅ 配置文件复制成功"
+          else
+            echo "❌ 配置文件复制失败"
+            exit 1
+          fi
+
       - name: 恢复Ultra luci缓存和ccache
         run: |
           echo "🔄 恢复Ultra luci缓存和ccache..."
@@ -1075,6 +1119,21 @@ jobs:
             ${{ env.OPENWRT_PATH }}
             ${{ env.TEMP_DIR }}
           key: ${{ needs.prepare.outputs.cache-key-base }}
+
+      - name: 复制配置文件到源码目录
+        run: |
+          echo "📋 复制配置文件到源码目录..."
+          # 确保配置文件在源码目录中可用（无论缓存是否命中）
+          cp -r ${{ github.workspace }}/configs ${{ env.OPENWRT_PATH }}/
+          
+          # 验证复制是否成功
+          cd ${{ env.OPENWRT_PATH }}
+          if [ -f "configs/base_ipq60xx.config" ]; then
+            echo "✅ 配置文件复制成功"
+          else
+            echo "❌ 配置文件复制失败"
+            exit 1
+          fi
 
       - name: 恢复Ultra luci缓存和ccache
         run: |

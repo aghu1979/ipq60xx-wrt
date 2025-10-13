@@ -3,15 +3,6 @@ name: OpenWrt 分步式固件编译
 on:
   workflow_dispatch:
     inputs:
-      branch:
-        description: '选择源码分支'
-        required: true
-        default: 'immortalwrt'
-        type: choice
-        options:
-        - openwrt
-        - immortalwrt
-        - libwrt
       arch:
         description: '选择芯片架构'
         required: true
@@ -22,12 +13,12 @@ on:
       release:
         description: '是否发布到Release'
         required: true
-        default: 'false'
+        default: true
         type: boolean
       upload_bin:
         description: '是否上传bin目录'
         required: true
-        default: 'false'
+        default: true
         type: boolean
 
 env:
@@ -37,14 +28,13 @@ env:
   REPO_URL_LIBWRT: "https://github.com/laipeng668/openwrt-6.x.git"
   
   # 全局环境变量
-  SOURCE_REPO: ${{ github.event.inputs.branch }}
   DEVICE_TARGET: qualcommax
   DEVICE_SUBTARGET: ${{ github.event.inputs.arch }}
   FIRMWARE_RELEASE: ${{ github.event.inputs.release }}
   UPLOAD_BIN_DIR: ${{ github.event.inputs.upload_bin }}
-  FILE_DATE: ${{ format('{0}-{1}', github.event.inputs.branch, github.event.inputs.arch) }}
-  DATE: ${{ format('{0}-{1}', github.event.inputs.branch, github.event.inputs.arch) }}
-  FIRMWARE_TAG: ${{ format('{0}-{1}', github.event.inputs.branch, github.event.inputs.arch) }}
+  FILE_DATE: ${{ format('openwrt-{0}', github.event.inputs.arch) }}
+  DATE: ${{ format('openwrt-{0}', github.event.inputs.arch) }}
+  FIRMWARE_TAG: ${{ format('openwrt-{0}', github.event.inputs.arch) }}
   OPENWRT_PATH: ${{ github.workspace }}/openwrt
   TEMP_DIR: ${{ github.workspace }}/temp
   LOG_DIR: ${{ github.workspace }}/logs
@@ -54,6 +44,9 @@ jobs:
   # 准备阶段：下载源码、配置基础系统
   prepare:
     runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        source_repo: [openwrt, immortalwrt, libwrt]
     outputs:
       cache-key-base: ${{ steps.cache-key-base.outputs.key }}
       cache-key-pro: ${{ steps.cache-key-pro.outputs.key }}
@@ -64,6 +57,7 @@ jobs:
       repo-url: ${{ steps.set-env.outputs.repo-url }}
       branch-name: ${{ steps.set-env.outputs.branch-name }}
       branch-abbr: ${{ steps.set-env.outputs.branch-abbr }}
+      source-repo: ${{ matrix.source_repo }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -72,7 +66,7 @@ jobs:
         id: set-env
         run: |
           # 设置仓库URL和分支
-          case "${{ env.SOURCE_REPO }}" in
+          case "${{ matrix.source_repo }}" in
             "openwrt") 
               REPO_URL="${{ env.REPO_URL_OPENWRT }}"
               BRANCH_NAME="master"
@@ -98,6 +92,7 @@ jobs:
           echo "REPO_URL=$REPO_URL" >> $GITHUB_ENV
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
           echo "BRANCH_ABBR=$BRANCH_ABBR" >> $GITHUB_ENV
+          echo "SOURCE_REPO=${{ matrix.source_repo }}" >> $GITHUB_ENV
           echo "VERSION_KERNEL=$(date +%Y.%m)" >> $GITHUB_ENV
           echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
           
@@ -108,28 +103,28 @@ jobs:
       - name: 生成各阶段缓存键
         id: cache-key-base
         run: |
-          CACHE_KEY="${{ env.SOURCE_REPO }}-${{ env.BRANCH_NAME }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-base-${{ hashFiles('configs/*.config') }}"
+          CACHE_KEY="${{ matrix.source_repo }}-${{ env.BRANCH_NAME }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-base-${{ hashFiles('configs/*.config') }}"
           echo "key=$CACHE_KEY" >> $GITHUB_OUTPUT
           echo "基础系统缓存键: $CACHE_KEY"
           
       - name: 生成Pro配置缓存键
         id: cache-key-pro
         run: |
-          CACHE_KEY="${{ env.SOURCE_REPO }}-${{ env.BRANCH_NAME }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-pro-${{ hashFiles('configs/*.config') }}"
+          CACHE_KEY="${{ matrix.source_repo }}-${{ env.BRANCH_NAME }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-pro-${{ hashFiles('configs/*.config') }}"
           echo "key=$CACHE_KEY" >> $GITHUB_OUTPUT
           echo "Pro配置缓存键: $CACHE_KEY"
           
       - name: 生成Max配置缓存键
         id: cache-key-max
         run: |
-          CACHE_KEY="${{ env.SOURCE_REPO }}-${{ env.BRANCH_NAME }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-max-${{ hashFiles('configs/*.config') }}"
+          CACHE_KEY="${{ matrix.source_repo }}-${{ env.BRANCH_NAME }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-max-${{ hashFiles('configs/*.config') }}"
           echo "key=$CACHE_KEY" >> $GITHUB_OUTPUT
           echo "Max配置缓存键: $CACHE_KEY"
           
       - name: 生成Ultra配置缓存键
         id: cache-key-ultra
         run: |
-          CACHE_KEY="${{ env.SOURCE_REPO }}-${{ env.BRANCH_NAME }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-ultra-${{ hashFiles('configs/*.config') }}"
+          CACHE_KEY="${{ matrix.source_repo }}-${{ env.BRANCH_NAME }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-ultra-${{ hashFiles('configs/*.config') }}"
           echo "key=$CACHE_KEY" >> $GITHUB_OUTPUT
           echo "Ultra配置缓存键: $CACHE_KEY"
 
@@ -142,7 +137,7 @@ jobs:
             ${{ env.TEMP_DIR }}
           key: ${{ steps.cache-key-base.outputs.key }}
           restore-keys: |
-            ${{ env.SOURCE_REPO }}-${{ env.BRANCH_NAME }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-base-
+            ${{ matrix.source_repo }}-${{ env.BRANCH_NAME }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-base-
 
       - name: 显示缓存状态
         run: |
@@ -173,7 +168,7 @@ jobs:
           echo "🔧 开始合并基础配置文件..."
           
           # 合并基础配置文件（不包含Pro/Max/Ultra）
-          cat configs/${{ env.DEVICE_SUBTARGET }}.base.config > ${{ env.OPENWRT_PATH }}/.config
+          cat configs/ipq60xx.base.config > ${{ env.OPENWRT_PATH }}/.config
           cat configs/${{ env.BRANCH_ABBR }}.config >> ${{ env.OPENWRT_PATH }}/.config
           
           echo "✅ 基础配置文件合并完成"
@@ -211,6 +206,11 @@ jobs:
         run: |
           echo "🔄 更新 feeds..."
           cd ${{ env.OPENWRT_PATH }}
+          
+          # 确保feeds目录存在
+          mkdir -p feeds/packages feeds/luci feeds/routing feeds/telephony feeds/management
+          
+          # 更新feeds
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           echo "✅ Feeds 更新完成"
@@ -228,6 +228,9 @@ jobs:
   build-base:
     needs: prepare
     runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        source_repo: [openwrt, immortalwrt, libwrt]
     outputs:
       build-status: ${{ steps.compile.outputs.status }}
     steps:
@@ -236,10 +239,30 @@ jobs:
 
       - name: 设置环境变量
         run: |
-          echo "REPO_URL=${{ needs.prepare.outputs.repo-url }}" >> $GITHUB_ENV
-          echo "BRANCH_NAME=${{ needs.prepare.outputs.branch-name }}" >> $GITHUB_ENV
-          echo "BRANCH_ABBR=${{ needs.prepare.outputs.branch-abbr }}" >> $GITHUB_ENV
-          echo "VERSION_KERNEL=${{ needs.prepare.outputs.kernel-version }}" >> $GITHUB_ENV
+          # 设置仓库URL和分支
+          case "${{ matrix.source_repo }}" in
+            "openwrt") 
+              REPO_URL="${{ env.REPO_URL_OPENWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="openwrt"
+              ;;
+            "immortalwrt") 
+              REPO_URL="${{ env.REPO_URL_IMMORTALWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="immwrt"
+              ;;
+            "libwrt") 
+              REPO_URL="${{ env.REPO_URL_LIBWRT }}"
+              BRANCH_NAME="k6.12-nss"
+              BRANCH_ABBR="libwrt"
+              ;;
+          esac
+          
+          echo "REPO_URL=$REPO_URL" >> $GITHUB_ENV
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          echo "BRANCH_ABBR=$BRANCH_ABBR" >> $GITHUB_ENV
+          echo "SOURCE_REPO=${{ matrix.source_repo }}" >> $GITHUB_ENV
+          echo "VERSION_KERNEL=$(date +%Y.%m)" >> $GITHUB_ENV
           echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
 
       - name: 恢复基础系统缓存
@@ -305,6 +328,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        source_repo: [openwrt, immortalwrt, libwrt]
         device: ${{ fromJson(needs.prepare.outputs.devices) }}
     steps:
       - name: 检出代码
@@ -312,10 +336,30 @@ jobs:
 
       - name: 设置环境变量
         run: |
-          echo "REPO_URL=${{ needs.prepare.outputs.repo-url }}" >> $GITHUB_ENV
-          echo "BRANCH_NAME=${{ needs.prepare.outputs.branch-name }}" >> $GITHUB_ENV
-          echo "BRANCH_ABBR=${{ needs.prepare.outputs.branch-abbr }}" >> $GITHUB_ENV
-          echo "VERSION_KERNEL=${{ needs.prepare.outputs.kernel-version }}" >> $GITHUB_ENV
+          # 设置仓库URL和分支
+          case "${{ matrix.source_repo }}" in
+            "openwrt") 
+              REPO_URL="${{ env.REPO_URL_OPENWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="openwrt"
+              ;;
+            "immortalwrt") 
+              REPO_URL="${{ env.REPO_URL_IMMORTALWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="immwrt"
+              ;;
+            "libwrt") 
+              REPO_URL="${{ env.REPO_URL_LIBWRT }}"
+              BRANCH_NAME="k6.12-nss"
+              BRANCH_ABBR="libwrt"
+              ;;
+          esac
+          
+          echo "REPO_URL=$REPO_URL" >> $GITHUB_ENV
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          echo "BRANCH_ABBR=$BRANCH_ABBR" >> $GITHUB_ENV
+          echo "SOURCE_REPO=${{ matrix.source_repo }}" >> $GITHUB_ENV
+          echo "VERSION_KERNEL=$(date +%Y.%m)" >> $GITHUB_ENV
           echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
           echo "CONFIG_TYPE=Pro" >> $GITHUB_ENV
 
@@ -377,7 +421,7 @@ jobs:
           cd ${{ env.OPENWRT_PATH }}
           
           # 创建设备临时目录
-          DEVICE_TEMP_DIR="${{ env.TEMP_DIR }}/pro/${{ matrix.device }}"
+          DEVICE_TEMP_DIR="${{ env.TEMP_DIR }}/pro/${{ matrix.source_repo }}/${{ matrix.device }}"
           mkdir -p $DEVICE_TEMP_DIR
           
           # 复制并重命名固件
@@ -400,8 +444,8 @@ jobs:
           fi
           
           # 复制并重命名清单文件
-          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ env.SOURCE_REPO }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" ]; then
-            cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ env.SOURCE_REPO }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" \
+          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" ]; then
+            cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" \
                "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Pro.manifest"
           fi
           
@@ -421,8 +465,8 @@ jobs:
       - name: 上传Pro配置产出物
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.SOURCE_REPO }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Pro
-          path: ${{ env.TEMP_DIR }}/pro/${{ matrix.device }}
+          name: ${{ matrix.source_repo }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Pro
+          path: ${{ env.TEMP_DIR }}/pro/${{ matrix.source_repo }}/${{ matrix.device }}
           retention-days: 7
 
   # Max配置编译阶段
@@ -432,6 +476,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        source_repo: [openwrt, immortalwrt, libwrt]
         device: ${{ fromJson(needs.prepare.outputs.devices) }}
     steps:
       - name: 检出代码
@@ -439,10 +484,30 @@ jobs:
 
       - name: 设置环境变量
         run: |
-          echo "REPO_URL=${{ needs.prepare.outputs.repo-url }}" >> $GITHUB_ENV
-          echo "BRANCH_NAME=${{ needs.prepare.outputs.branch-name }}" >> $GITHUB_ENV
-          echo "BRANCH_ABBR=${{ needs.prepare.outputs.branch-abbr }}" >> $GITHUB_ENV
-          echo "VERSION_KERNEL=${{ needs.prepare.outputs.kernel-version }}" >> $GITHUB_ENV
+          # 设置仓库URL和分支
+          case "${{ matrix.source_repo }}" in
+            "openwrt") 
+              REPO_URL="${{ env.REPO_URL_OPENWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="openwrt"
+              ;;
+            "immortalwrt") 
+              REPO_URL="${{ env.REPO_URL_IMMORTALWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="immwrt"
+              ;;
+            "libwrt") 
+              REPO_URL="${{ env.REPO_URL_LIBWRT }}"
+              BRANCH_NAME="k6.12-nss"
+              BRANCH_ABBR="libwrt"
+              ;;
+          esac
+          
+          echo "REPO_URL=$REPO_URL" >> $GITHUB_ENV
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          echo "BRANCH_ABBR=$BRANCH_ABBR" >> $GITHUB_ENV
+          echo "SOURCE_REPO=${{ matrix.source_repo }}" >> $GITHUB_ENV
+          echo "VERSION_KERNEL=$(date +%Y.%m)" >> $GITHUB_ENV
           echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
           echo "CONFIG_TYPE=Max" >> $GITHUB_ENV
 
@@ -504,7 +569,7 @@ jobs:
           cd ${{ env.OPENWRT_PATH }}
           
           # 创建设备临时目录
-          DEVICE_TEMP_DIR="${{ env.TEMP_DIR }}/max/${{ matrix.device }}"
+          DEVICE_TEMP_DIR="${{ env.TEMP_DIR }}/max/${{ matrix.source_repo }}/${{ matrix.device }}"
           mkdir -p $DEVICE_TEMP_DIR
           
           # 复制并重命名固件
@@ -527,8 +592,8 @@ jobs:
           fi
           
           # 复制并重命名清单文件
-          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ env.SOURCE_REPO }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" ]; then
-            cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ env.SOURCE_REPO }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" \
+          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" ]; then
+            cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" \
                "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Max.manifest"
           fi
           
@@ -548,8 +613,8 @@ jobs:
       - name: 上传Max配置产出物
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.SOURCE_REPO }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Max
-          path: ${{ env.TEMP_DIR }}/max/${{ matrix.device }}
+          name: ${{ matrix.source_repo }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Max
+          path: ${{ env.TEMP_DIR }}/max/${{ matrix.source_repo }}/${{ matrix.device }}
           retention-days: 7
 
   # Ultra配置编译阶段
@@ -559,6 +624,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        source_repo: [openwrt, immortalwrt, libwrt]
         device: ${{ fromJson(needs.prepare.outputs.devices) }}
     steps:
       - name: 检出代码
@@ -566,10 +632,30 @@ jobs:
 
       - name: 设置环境变量
         run: |
-          echo "REPO_URL=${{ needs.prepare.outputs.repo-url }}" >> $GITHUB_ENV
-          echo "BRANCH_NAME=${{ needs.prepare.outputs.branch-name }}" >> $GITHUB_ENV
-          echo "BRANCH_ABBR=${{ needs.prepare.outputs.branch-abbr }}" >> $GITHUB_ENV
-          echo "VERSION_KERNEL=${{ needs.prepare.outputs.kernel-version }}" >> $GITHUB_ENV
+          # 设置仓库URL和分支
+          case "${{ matrix.source_repo }}" in
+            "openwrt") 
+              REPO_URL="${{ env.REPO_URL_OPENWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="openwrt"
+              ;;
+            "immortalwrt") 
+              REPO_URL="${{ env.REPO_URL_IMMORTALWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="immwrt"
+              ;;
+            "libwrt") 
+              REPO_URL="${{ env.REPO_URL_LIBWRT }}"
+              BRANCH_NAME="k6.12-nss"
+              BRANCH_ABBR="libwrt"
+              ;;
+          esac
+          
+          echo "REPO_URL=$REPO_URL" >> $GITHUB_ENV
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          echo "BRANCH_ABBR=$BRANCH_ABBR" >> $GITHUB_ENV
+          echo "SOURCE_REPO=${{ matrix.source_repo }}" >> $GITHUB_ENV
+          echo "VERSION_KERNEL=$(date +%Y.%m)" >> $GITHUB_ENV
           echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
           echo "CONFIG_TYPE=Ultra" >> $GITHUB_ENV
 
@@ -631,7 +717,7 @@ jobs:
           cd ${{ env.OPENWRT_PATH }}
           
           # 创建设备临时目录
-          DEVICE_TEMP_DIR="${{ env.TEMP_DIR }}/ultra/${{ matrix.device }}"
+          DEVICE_TEMP_DIR="${{ env.TEMP_DIR }}/ultra/${{ matrix.source_repo }}/${{ matrix.device }}"
           mkdir -p $DEVICE_TEMP_DIR
           
           # 复制并重命名固件
@@ -654,8 +740,8 @@ jobs:
           fi
           
           # 复制并重命名清单文件
-          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ env.SOURCE_REPO }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" ]; then
-            cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ env.SOURCE_REPO }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" \
+          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" ]; then
+            cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" \
                "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Ultra.manifest"
           fi
           
@@ -675,8 +761,8 @@ jobs:
       - name: 上传Ultra配置产出物
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.SOURCE_REPO }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Ultra
-          path: ${{ env.TEMP_DIR }}/ultra/${{ matrix.device }}
+          name: ${{ matrix.source_repo }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Ultra
+          path: ${{ env.TEMP_DIR }}/ultra/${{ matrix.source_repo }}/${{ matrix.device }}
           retention-days: 7
 
   # 汇总阶段：整理所有产出物并发布
@@ -690,10 +776,7 @@ jobs:
 
       - name: 设置环境变量
         run: |
-          echo "REPO_URL=${{ needs.prepare.outputs.repo-url }}" >> $GITHUB_ENV
-          echo "BRANCH_NAME=${{ needs.prepare.outputs.branch-name }}" >> $GITHUB_ENV
-          echo "BRANCH_ABBR=${{ needs.prepare.outputs.branch-abbr }}" >> $GITHUB_ENV
-          echo "VERSION_KERNEL=${{ needs.prepare.outputs.kernel-version }}" >> $GITHUB_ENV
+          echo "VERSION_KERNEL=$(date +%Y.%m)" >> $GITHUB_ENV
           echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
 
       - name: 创建目录结构
@@ -717,13 +800,15 @@ jobs:
           
           # 合并所有设备产出物
           for config_type in pro max ultra; do
-            for device_dir in ${{ env.TEMP_DIR }}/artifacts/*${config_type}/*; do
-              if [ -d "$device_dir" ]; then
-                echo "处理配置: $config_type, 设备: $(basename $device_dir)"
-                
-                # 复制所有文件到最终目录
-                cp -r "$device_dir"/* "$FINAL_DIR/"
-              fi
+            for source_repo in openwrt immortalwrt libwrt; do
+              for device_dir in ${{ env.TEMP_DIR }}/artifacts/${source_repo}-${{ env.DEVICE_SUBTARGET }}-*-${config_type}/*; do
+                if [ -d "$device_dir" ]; then
+                  echo "处理仓库: $source_repo, 配置: $config_type, 设备: $(basename $device_dir)"
+                  
+                  # 复制所有文件到最终目录
+                  cp -r "$device_dir"/* "$FINAL_DIR/"
+                fi
+              done
             done
           done
           
@@ -745,24 +830,18 @@ jobs:
           
           # 创建Release说明
           cat > ${{ env.TEMP_DIR }}/release_notes.md << EOF
-          # ${{ env.SOURCE_REPO }} 固件发布
+          # OpenWrt 固件发布
           
           ## 📒 固件信息
           - 这是分步式编译的固件，包含Pro、Max、Ultra三种配置
-          - 💻 这是 ${{ env.DEVICE_SUBTARGET }} 平台使用的 ${{ env.SOURCE_REPO }} 固件
-          - ⚽ 固件源码: ${{ env.REPO_URL }}
-          - 💝 源码分支: ${{ env.BRANCH_NAME }}
+          - 💻 这是 ${{ env.DEVICE_SUBTARGET }} 平台使用的 OpenWrt 固件
           - 🌐 默认地址: **192.168.111.1**
           - 🔑 默认密码: none
           - 📶 默认WIFI密码: 12345678
           
           ## 🧊 固件版本
           - 固件内核版本：**${{ env.VERSION_KERNEL }}**
-          - 固件编译前最后一次➦[主源码](${{ env.REPO_URL }})更新记录
           - ${{ env.VERSION_INFO }}
-          
-          ## 📦 包含的设备
-          ${{ needs.prepare.outputs.devices }}
           
           ## 📋 包含的软件包
           \`\`\`
@@ -770,8 +849,8 @@ jobs:
           \`\`\`
           
           ## 📥 下载说明
-          - 固件文件命名规则: ${{ env.BRANCH_ABBR }}-芯片-设备-类型-配置.bin
-          - 例如: ${{ env.BRANCH_ABBR }}-ipq60xx-jdcloud_re-ss-01-sysupgrade-Pro.bin
+          - 固件文件命名规则: 分支缩写-芯片-设备-类型-配置.bin
+          - 例如: openwrt-ipq60xx-jdcloud_re-ss-01-sysupgrade-Pro.bin
           
           ---
           作者: Mary
@@ -801,7 +880,7 @@ jobs:
           echo "🗑️ 删除旧缓存..."
           
           # 获取缓存列表并删除
-          gh cache list --key ${{ env.SOURCE_REPO }}-${{ env.BRANCH_NAME }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}- --json key --jq '.[] | .key' | while read -r key; do
+          gh cache list --key openwrt-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}- --json key --jq '.[] | .key' | while read -r key; do
             gh cache delete "$key"
           done
           

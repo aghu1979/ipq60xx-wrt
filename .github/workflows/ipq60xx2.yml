@@ -1,4 +1,4 @@
-name: OpenWrt 高效分步式固件编译
+name: OpenWrt 高效分步式固件编译2
 
 on:
   workflow_dispatch:
@@ -33,16 +33,16 @@ env:
   FIRMWARE_RELEASE: ${{ github.event.inputs.release }}
   UPLOAD_BIN_DIR: ${{ github.event.inputs.upload_bin }}
   FILE_DATE: ${{ format('openwrt-{0}', github.event.inputs.arch) }}
-  DATE: ${{ format('openwrt-{0}', github.event.inputs.arch) }}
+  DATE: ${{ format('openwrt-{0}', github.event.inputs.arch) }
   FIRMWARE_TAG: ${{ format('openwrt-{0}', github.event.inputs.arch) }}
   OPENWRT_PATH: ${{ github.workspace }}/openwrt
   TEMP_DIR: ${{ github.workspace }}/temp
-  LOG_DIR: $github.workspace }}/logs
+  LOG_DIR: ${{ github.workspace }}/logs
   PACKAGE_DIR: ${{ github.workspace }}/packages
   CCACHE_DIR: ${{ github.workspace }}/.ccache
 
 jobs:
-  # 预编译阶段：基于Ultra配置编译完整luci缓存（架构级别）- 独立运行
+  # 预编译阶段：基于Ultra配置编译完整luci缓存（架构级别）- 独�立运行
   prebuild-luci-ultra:
     runs-on: ubuntu-22.04
     outputs:
@@ -344,7 +344,7 @@ jobs:
           make download -j$(nproc)
           echo "✅ 源码包下载完成"
 
-      - name: 预编译Ultra配置的luci软件包（如果需要）
+      - name: 需要
         if: steps.verify-luci-cache.outputs.valid != 'true'
         run: |
           echo "🔨 预编译immortalwrt的Ultra配置luci软件包（完整缓存）..."
@@ -386,7 +386,7 @@ jobs:
           cd ${{ env.OPENWRT_PATH }}
           
           # 检查staging_dir
-          STAGING_DIR="${{ env.OPENWRT_PATH }}/staging_dir"
+          STAGING_DIR="${{ env.OPENWRT_PATH }}/staging_dir
           if [ -d "$STAGING_DIR" ]; then
             STAGING_SIZE=$(du -sh "$STAGING_DIR" | cut -f1)
             echo "staging_dir大小: $STAGING_SIZE"
@@ -406,7 +406,7 @@ jobs:
           fi
           
           # 检查build_dir
-          BUILD_DIR="${{ env.OPENWRT_PATH }}/build_dir"
+          BUILD_DIR="${{ env.OPENWRT_PATH }}/build_dir
           if [ -d "$BUILD_DIR" ]; then
             BUILD_SIZE=$(du -sh "$BUILD_DIR" | cut -f1)
             echo "build_dir大小: $BUILD_SIZE"
@@ -456,7 +456,9 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        source_repo: [openwrt, immortalwrt, cache-key-base: ${{ steps.cache-key-base.outputs.key }}
+        source_repo: [openwrt, immortalwrt, libwrt]
+    outputs:
+      cache-key-base: ${{ steps.cache-key-base.outputs.key }}
       cache-key-toolchain: ${{ steps.cache-key-base.outputs.toolchain-key }}
       devices: ${{ steps.get-devices.outputs.devices }}
       kernel-version: ${{ steps.get-kernel.outputs.version }}
@@ -472,25 +474,6 @@ jobs:
           fetch-depth: 0
           # 确保检出所有分支
           fetch-tags: true
-
-      - name: 验证配置文件存在
-        run: |
-          echo "🔍 验证配置文件存在..."
-          # 切换到仓库根目录
-          cd ${{ github.workspace }}
-          
-          # 列出所有文件和目录
-          echo "当前目录内容："
-          ls -la
-          
-          # 检查configs目录
-          if [ -d "configs" ]; then
-            echo "configs目录存在，内容："
-            ls -la configs/
-          else
-            echo "❌ configs目录不存在"
-            exit 1
-          fi
 
       - name: 设置环境变量
         id: set-env
@@ -560,6 +543,7 @@ jobs:
           key: ${{ steps.cache-key-base.outputs.key }}
           restore-keys: |
             ${{ matrix.source_repo }}-${{ env.BRANCH_NAME }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-base-
+            -
 
       - name: 检查工具链缓存
         id: restore-cache-toolchain
@@ -707,7 +691,7 @@ jobs:
             ${{ env.TEMP_DIR }}
           key: ${{ steps.cache-key-base.outputs.key }}
 
-  # 基础系统编译阶段（分支级别）- 独立运行
+  # 基础系统编译阶段（分支级别）- 等立运行
   build-base:
     needs: prepare
     runs-on: ubuntu-22.04
@@ -722,7 +706,7 @@ jobs:
         with:
           # 确保检出所有文件和历史
           fetch-depth: 0
-          # 确保检出所有分支
+          # 篡保检出所有分支
           fetch-tags: true
 
       - name: 设置环境变量
@@ -986,13 +970,13 @@ jobs:
           cd ${{ env.OPENWRT_PATH }}
           
           # 创建设备临时目录
-          DEVICE_TEMP_DIR="${{ env.TEMP_DIR }}/pro/${{ matrix.source_repo }}/${{ matrix.device }}"
+          DEVICE_TEMP_DIR="${{ env.TEMP_DIR }}/pro/${{ matrix.source_repo }}/${{ matrix.device }}
           mkdir -p $DEVICE_TEMP_DIR
           
           # 复制并重命名固件
           for file in bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/*${{ env.DEVICE_SUBTARGET }}*${{ matrix.device }}*squashfs-*.bin; do
             if [ -f "$file" ]; then
-              filename=$(basename "$file")
+              filename=$(basename "$file"
               if [[ "$filename" =~ "factory.bin" ]]; then
                 new_name="${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-factory-Pro.bin"
               elif [[ "$filename" =~ "sysupgrade.bin" ]]; then
@@ -1044,7 +1028,7 @@ jobs:
         source_repo: [openwrt, immortalwrt, libwrt]
         device: ${{ fromJson(needs.prepare.outputs.devices) }}
     steps:
-      - name: 查出代码
+      - name: 检出代码
         uses: actions/checkout@v4
         with:
           # 确保检出所有文件和历史
@@ -1101,7 +1085,7 @@ jobs:
         run: |
           echo "📋 复制配置文件到源码目录..."
           # 确保配置文件在源码目录中可用（无论缓存是否命中）
-          cp -r ${{ github.workspace }}/configs ${{ env.OPENWRT_PATH }}/
+          cp -r ${{ github.workspace }}/configs ${{ env.OPENWRT }}/
           
           # 验证复制是否成功
           cd ${{ env.OPENWRT_PATH }}
@@ -1174,13 +1158,13 @@ jobs:
           cd ${{ env.OPENWRT_PATH }}
           
           # 创建设备临时目录
-          DEVICE_TEMP_DIR="${{ env.TEMP_DIR }}/max/${{ matrix.source_repo }}/${{ matrix.device }}"
+          DEVICE_TEMP_DIR="${{ env.TEMP_DIR }}/max/${{ matrix.source_repo }}/${{ matrix.device }}
           mkdir -p $DEVICE_TEMP_DIR
           
           # 复制并重命名固件
           for file in bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/*${{ env.DEVICE_SUBTARGET }}*${{ matrix.device }}*squashfs-*.bin; do
             if [ -f "$file" ]; then
-              filename=$(basename "$file")
+              filename=$(basename "$file"
               if [[ "$filename" =~ "factory.bin" ]]; then
                 new_name="${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-factory-Max.bin"
               elif [[ "$filename" =~ "sysupgrade.bin" ]]; then
@@ -1197,13 +1181,13 @@ jobs:
           fi
           
           # 复制并重命名清单文件
-          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" ]; then
+          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}.manifest"; then
             cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" \
                "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Max.manifest"
           fi
           
           # 复制并重命名构建信息
-          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/config.buildinfo" ]; then
+          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/config.buildinfo"; then
             cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/config.buildinfo" \
                "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Max.config.buildinfo"
           fi
@@ -1219,7 +1203,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.source_repo }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Max
-          path: ${{ env.TEMP_DIR }}/max/${{ matrix.source_repo }}/${{ matrix.device }}
+          path: ${{ env.TEMP_DIR }}/max/${{ matrix.source_repo }}/${{ matrix.device }}-Max
           retention-days: 7
 
   # Ultra配置编译阶段（设备级别）- 依赖sync-cache
@@ -1237,7 +1221,7 @@ jobs:
         with:
           # 确保检出所有文件和历史
           fetch-depth: 0
-          # 确�保检出所有分支
+          # 确保检出所有分支
           fetch-tags: true
 
       - name: 设置环境变量
@@ -1266,7 +1250,7 @@ jobs:
           echo "BRANCH_ABBR=$BRANCH_ABBR" >> $GITHUB_ENV
           echo "SOURCE_REPO=${{ matrix.source_repo }}" >> $GITHUB_ENV
           echo "VERSION_KERNEL=$(date +%Y.%m)" >> $GITHUB_ENV
-          echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+          echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%M')" >> $GITHUB_ENV
           echo "CONFIG_TYPE=Ultra" >> $GITHUB_ENV
 
       - name: 检查基础系统编译状态
@@ -1289,7 +1273,7 @@ jobs:
         run: |
           echo "📋 复制配置文件到源码目录..."
           # 确保配置文件在源码目录中可用（无论缓存是否命中）
-          cp -r ${{ github.workspace }}/configs ${{ env.OPENWRT_PATH }}/
+          cp -r ${{ github.workspace }}/configs ${{ env.OPENWRT }}/
           
           # 验证复制是否成功
           cd ${{ env.OPENWRT_PATH }}
@@ -1362,7 +1346,7 @@ jobs:
           cd ${{ env.OPENWRT_PATH }}
           
           # 创建设备临时目录
-          DEVICE_TEMP_DIR="${{ env.TEMP_DIR }}/ultra/${{ matrix.source_repo }}/${{ matrix.device }}"
+          DEVICE_TEMP_DIR="${{ env.TEMP_DIR }}/ultra/${{ matrix.source_repo }}/${{ matrix.device }}
           mkdir -p $DEVICE_TEMP_DIR
           
           # 复制并重命名固件
@@ -1371,7 +1355,7 @@ jobs:
               filename=$(basename "$file")
               if [[ "$filename" =~ "factory.bin" ]]; then
                 new_name="${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-factory-Ultra.bin"
-              elif [[ "$filename" =~ "sysupgrade.bin" ]]; then
+              elif [[ "$filename" =~ "sysupgrade.bin" ]; then
                 new_name="${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-sysupgrade-Ultra.bin"
               fi
               cp "$file" "$DEVICE_TEMP_DIR/$new_name"
@@ -1385,15 +1369,15 @@ jobs:
           fi
           
           # 复制并重命名清单文件
-          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" ]; then
-            cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" \
+          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}.manifest"; then
+            cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}.manifest" \
                "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Ultra.manifest"
           fi
           
           # 复制并重命名构建信息
-          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/config.buildinfo" ]; then
+          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/config.buildinfo"; then
             cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/config.buildinfo" \
-               "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Ultra.config.buildinfo"
+               "$DEVICE_TEMP_DIR/${ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Ultra.config.buildinfo"
           fi
           
           # 复制日志
@@ -1407,7 +1391,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.source_repo }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Ultra
-          path: ${{ env.TEMP_DIR }}/ultra/${{ matrix.source_repo }}/${{ matrix.device }}
+          path: ${{ env.TEMP_DIR }}/ultra/${{ matrix.source_repo }}/${{ matrix.device }}-Ultra
           retention-days: 7
 
   # 汇总阶段：整理所有产出物并发布
@@ -1427,7 +1411,7 @@ jobs:
       - name: 设置环境变量
         run: |
           echo "VERSION_KERNEL=$(date +%Y.%m)" >> $GITHUB_ENV
-          echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+          echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%M:%S')" >> $GITHUB_ENV
 
       - name: 创建目录结构
         run: |
@@ -1435,6 +1419,8 @@ jobs:
           mkdir -p ${{ env.TEMP_DIR }}
           mkdir -p ${{ env.LOG_DIR }}
           mkdir -p ${{ env.PACKAGE_DIR }}
+          mkdir -p ${{ env.PACKAGE_DIR }}
+          mkdir -p ${{ env.CCACHE_DIR }}
 
       - name: 下载所有产出物
         uses: actions/download-artifact@v4
@@ -1505,7 +1491,7 @@ jobs:
           
           ---
           作者: Mary
-          发布时间: $(date '+%Y-%m-%d %H:%M:%S')
+          发布时间: $(date '+%Y-%m-%d %H:%M:%M:%S')
           EOF
           
           echo "✅ Release说明生成完成"

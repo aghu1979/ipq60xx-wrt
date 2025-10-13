@@ -117,13 +117,13 @@ jobs:
   
     - name: Load Custom Configuration(加载自定义配置)
       run: |
-        chmod +x $DIY_SCRIPT
+        chmod +x $SCRIPT_DIY
         cd $OPENWRT_PATH
-        $GITHUB_WORKSPACE/$DIY_SCRIPT
+        $GITHUB_WORKSPACE/$SCRIPT_DIY
 
     - name: Download DL Package(下载DL软件包)
       run: |
-        cat $CONFIG_FILE $GENERAL_CONFIG_FILE > $OPENWRT_PATH/.config
+        cat $BASE_CONFIG_FILE $BRANCH_CONFIG_FILE $CONFIG_FILE_Ultra > $OPENWRT_PATH/.config
         cd $OPENWRT_PATH
         make defconfig
         make download -j$(nproc)

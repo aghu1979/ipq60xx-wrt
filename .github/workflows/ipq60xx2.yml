@@ -1,4 +1,4 @@
-name: OpenWrt 高效分步式固件编译2
+name: OpenWrt 高效分步式固件编译
 
 on:
   workflow_dispatch:
@@ -186,7 +186,6 @@ jobs:
           echo "ccache缓存: ${{ steps.cache-ccache.outputs.cache-hit }}"
 
       - name: 配置Ultra编译环境
-        if: steps.cache-luci.outputs.cache-hit != 'true'
         run: |
           echo "⚙️ 配置immortalwrt的Ultra编译环境（用于完整luci缓存）..."
           cd ${{ env.OPENWRT_PATH }}
@@ -209,7 +208,6 @@ jobs:
           echo "✅ immortalwrt的Ultra配置完成"
 
       - name: 验证luci包列表
-        if: steps.cache-luci.outputs.cache-hit != 'true'
         run: |
           echo "🔍 验证luci包列表..."
           cd ${{ env.OPENWRT_PATH }}
@@ -235,14 +233,90 @@ jobs:
             echo "当前.config文件中的luci包配置:"
             grep "^CONFIG_PACKAGE_luci-" .config || echo "未找到任何luci包配置"
             echo ""
+            echo "合并的配置文件内容:"
+            echo "=== base_ipq60xx.config ==="
+            cat configs/base_ipq60xx.config
+            echo ""
+            echo "=== base_immwrt.config ==="
+            cat configs/base_immwrt.config
+            echo ""
+            echo "=== Ultra.config ==="
+            cat configs/Ultra.config
+            echo ""
             echo "终止编译过程以避免后续错误"
             exit 1
           else
             echo "✅ luci包数量正常 ($LUCI_COUNT)，继续编译"
           fi
 
+      - name: 验证缓存有效性
+        id: verify-luci-cache
+        run: |
+          echo "🔍 验证缓存有效性..."
+          
+          # 检查缓存是否命中
+          CACHE_HIT="${{ steps.cache-luci.outputs.cache-hit }}"
+          echo "缓存命中状态: $CACHE_HIT"
+          
+          # 如果缓存命中，验证缓存内容
+          if [ "$CACHE_HIT" == "true" ]; then
+            # 检查关键目录是否存在且不为空
+            STAGING_DIR="${{ env.OPENWRT_PATH }}/staging_dir"
+            BUILD_DIR="${{ env.OPENWRT_PATH }}/build_dir"
+            
+            # 检查staging_dir
+            if [ -d "$STAGING_DIR" ]; then
+              STAGING_SIZE=$(du -sh "$STAGING_DIR" | cut -f1)
+              echo "staging_dir大小: $STAGING_SIZE"
+              
+              # 检查是否有luci相关的文件
+              LUCI_FILES=$(find "$STAGING_DIR" -name "*luci*" -type f | wc -l)
+              echo "staging_dir中luci文件数量: $LUCI_FILES"
+              
+              # 如果staging_dir太小或没有luci文件，认为缓存无效
+              if [ "$LUCI_FILES" -lt 10 ] || [ "$STAGING_SIZE" == "0" ]; then
+                echo "❌ staging_dir中luci文件太少或大小为0，缓存无效"
+                echo "valid=false" >> $GITHUB_OUTPUT
+              else
+                echo "✅ staging_dir中luci文件数量正常"
+                echo "valid=true" >> $GITHUB_OUTPUT
+              fi
+            else
+              echo "❌ staging_dir不存在，缓存无效"
+              echo "valid=false" >> $GITHUB_OUTPUT
+            fi
+            
+            # 检查build_dir
+            if [ -d "$BUILD_DIR" ]; then
+              BUILD_SIZE=$(du -sh "$BUILD_DIR" | cut -f1)
+              echo "build_dir大小: $BUILD_SIZE"
+              
+              # 检查是否有luci相关的构建目录
+              LUCI_DIRS=$(find "$BUILD_DIR" -name "*luci*" -type d | wc -l)
+              echo "build_dir中luci目录数量: $LUCI_DIRS"
+              
+              # 如果build_dir太小或没有luci目录，认为缓存无效
+              if [ "$LUCI_DIRS" -lt 5 ] || [ "$BUILD_SIZE" == "0" ]; then
+                echo "❌ build_dir中luci目录太少或大小为0，缓存无效"
+                echo "valid=false" >> $GITHUB_OUTPUT
+              else
+                echo "✅ build_dir中luci目录数量正常"
+                # 只有当staging_dir也有效时，才认为缓存有效
+                if [ "${{ steps.verify-luci-cache.outputs.valid }}" != "false" ]; then
+                  echo "valid=true" >> $GITHUB_OUTPUT
+                fi
+              fi
+            else
+              echo "❌ build_dir不存在，缓存无效"
+              echo "valid=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "缓存未命中，需要重新编译"
+            echo "valid=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: 更新feeds（如果需要）
-        if: steps.cache-luci.outputs.cache-hit != 'true'
+        if: steps.verify-luci-cache.outputs.valid != 'true'
         run: |
           echo "🔄 更新immortalwrt的feeds..."
           cd ${{ env.OPENWRT_PATH }}
@@ -265,7 +339,7 @@ jobs:
           echo "✅ 源码包下载完成"
 
       - name: 预编译Ultra配置的luci软件包（如果需要）
-        if: steps.cache-luci.outputs.cache-hit != 'true'
+        if: steps.verify-luci-cache.outputs.valid != 'true'
         run: |
           echo "🔨 预编译immortalwrt的Ultra配置luci软件包（完整缓存）..."
           cd ${{ env.OPENWRT_PATH }}
@@ -300,7 +374,7 @@ jobs:
           echo "✅ immortalwrt的Ultra配置luci软件包预编译完成"
 
       - name: 验证编译结果
-        if: steps.cache-luci.outputs.cache-hit != 'true'
+        if: steps.verify-luci-cache.outputs.valid != 'true'
         run: |
           echo "🔍 验证编译结果..."
           cd ${{ env.OPENWRT_PATH }}
@@ -346,7 +420,7 @@ jobs:
           fi
 
       - name: 保存luci软件包缓存
-        if: steps.cache-luci.outputs.cache-hit != 'true'
+        if: steps.verify-luci-cache.outputs.valid != 'true'
         uses: actions/cache/save@v4
         with:
           path: |

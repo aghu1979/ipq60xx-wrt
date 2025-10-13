@@ -49,6 +49,7 @@ jobs:
       luci-cache-key: ${{ steps.cache-luci.outputs.key }}
       download-cache-key: ${{ steps.cache-download.outputs.key }}
       ccache-cache-key: ${{ steps.cache-ccache.outputs.key }}
+      luci-cache-valid: ${{ steps.verify-luci-cache.outputs.valid }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -207,6 +208,39 @@ jobs:
           make defconfig
           echo "✅ immortalwrt的Ultra配置完成"
 
+      - name: 验证luci包列表
+        if: steps.cache-luci.outputs.cache-hit != 'true'
+        run: |
+          echo "🔍 验证luci包列表..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 获取Ultra配置中的所有luci包
+          LUCI_PACKAGES=$(grep "^CONFIG_PACKAGE_luci-" .config | sed 's/CONFIG_PACKAGE_\(.*\)=y/\1/')
+          
+          # 统计luci包数量
+          LUCI_COUNT=$(echo "$LUCI_PACKAGES" | grep -c .)
+          
+          echo "检测到的luci包数量: $LUCI_COUNT"
+          echo "luci包列表:"
+          echo "$LUCI_PACKAGES"
+          
+          # 如果luci包数量小于10个，警告并终止
+          if [ "$LUCI_COUNT" -lt 10 ]; then
+            echo "❌ 错误: luci包数量太少 ($LUCI_COUNT)，可能配置文件有问题"
+            echo "请检查以下配置文件:"
+            echo "  - configs/base_ipq60xx.config"
+            echo "  - configs/base_immwrt.config"
+            echo "  - configs/Ultra.config"
+            echo ""
+            echo "当前.config文件中的luci包配置:"
+            grep "^CONFIG_PACKAGE_luci-" .config || echo "未找到任何luci包配置"
+            echo ""
+            echo "终止编译过程以避免后续错误"
+            exit 1
+          else
+            echo "✅ luci包数量正常 ($LUCI_COUNT)，继续编译"
+          fi
+
       - name: 更新feeds（如果需要）
         if: steps.cache-luci.outputs.cache-hit != 'true'
         run: |
@@ -264,6 +298,52 @@ jobs:
           done
           
           echo "✅ immortalwrt的Ultra配置luci软件包预编译完成"
+
+      - name: 验证编译结果
+        if: steps.cache-luci.outputs.cache-hit != 'true'
+        run: |
+          echo "🔍 验证编译结果..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 检查staging_dir
+          STAGING_DIR="${{ env.OPENWRT_PATH }}/staging_dir"
+          if [ -d "$STAGING_DIR" ]; then
+            STAGING_SIZE=$(du -sh "$STAGING_DIR" | cut -f1)
+            echo "staging_dir大小: $STAGING_SIZE"
+            
+            # 检查是否有luci相关的文件
+            LUCI_FILES=$(find "$STAGING_DIR" -name "*luci*" -type f | wc -l)
+            echo "staging_dir中luci文件数量: $LUCI_FILES"
+            
+            # 如果luci文件太少，可能编译有问题
+            if [ "$LUCI_FILES" -lt 10 ]; then
+              echo "⚠️ staging_dir中luci文件太少，可能编译不完整"
+            else
+              echo "✅ staging_dir中luci文件数量正常"
+            fi
+          else
+            echo "❌ staging_dir不存在，编译可能失败"
+          fi
+          
+          # 检查build_dir
+          BUILD_DIR="${{ env.OPENWRT_PATH }}/build_dir"
+          if [ -d "$BUILD_DIR" ]; then
+            BUILD_SIZE=$(du -sh "$BUILD_DIR" | cut -f1)
+            echo "build_dir大小: $BUILD_SIZE"
+            
+            # 检查是否有luci相关的构建目录
+            LUCI_DIRS=$(find "$BUILD_DIR" -name "*luci*" -type d | wc -l)
+            echo "build_dir中luci目录数量: $LUCI_DIRS"
+            
+            # 如果luci目录太少，可能编译有问题
+            if [ "$LUCI_DIRS" -lt 5 ]; then
+              echo "⚠️ build_dir中luci目录太少，可能编译不完整"
+            else
+              echo "✅ build_dir中luci目录数量正常"
+            fi
+          else
+            echo "❌ build_dir不存在，编译可能失败"
+          fi
 
       - name: 保存luci软件包缓存
         if: steps.cache-luci.outputs.cache-hit != 'true'
@@ -671,6 +751,7 @@ jobs:
       download-cache-key: ${{ needs.prebuild-luci-ultra.outputs.download-cache-key }}
       ccache-cache-key: ${{ needs.prebuild-luci-ultra.outputs.ccache-cache-key }}
       build-status: ${{ needs.build-base.outputs.build-status }}
+      luci-cache-valid: ${{ needs.prebuild-luci-ultra.outputs.luci-cache-valid }}
     steps:
       - name: 同步缓存状态
         run: |
@@ -679,6 +760,7 @@ jobs:
           echo "下载缓存键: ${{ needs.prebuild-luci-ultra.outputs.download-cache-key }}"
           echo "ccache缓存键: ${{ needs.prebuild-luci-ultra.outputs.ccache-cache-key }}"
           echo "基础系统编译状态: ${{ needs.build-base.outputs.build-status }}"
+          echo "luci缓存有效性: ${{ needs.prebuild-luci-ultra.outputs.luci-cache-valid }}"
           echo "✅ 缓存同步完成"
 
   # Pro配置编译阶段（设备级别）- 依赖sync-cache

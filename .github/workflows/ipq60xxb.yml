@@ -1,0 +1,1320 @@
+name: OpenWrt 高效分步并行式固件编译
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: '选择芯片架构'
+        required: true
+        default: 'ipq60xx'
+        type: choice
+        options:
+        - ipq60xx
+      release:
+        description: '是否发布到Release'
+        required: true
+        default: true
+        type: boolean
+      upload_bin:
+        description: '是否上传bin目录'
+        required: true
+        default: true
+        type: boolean
+
+env:
+  # 分支URL映射
+  REPO_URL_OPENWRT: "https://github.com/laipeng668/openwrt.git"
+  REPO_URL_IMMORTALWRT: "https://github.com/laipeng668/immortalwrt.git"
+  REPO_URL_LIBWRT: "https://github.com/laipeng668/openwrt-6.x.git"
+  
+  # 全局环境变量
+  DEVICE_TARGET: qualcommax
+  DEVICE_SUBTARGET: ${{ github.event.inputs.arch }}
+  FIRMWARE_RELEASE: ${{ github.event.inputs.release }}
+  UPLOAD_BIN_DIR: ${{ github.event.inputs.upload_bin }}
+  FILE_DATE: ${{ format('openwrt-{0}', github.event.inputs.arch) }}
+  DATE: ${{ format('openwrt-{0}', github.event.inputs.arch) }}
+  FIRMWARE_TAG: ${{ format('openwrt-{0}', github.event.inputs.arch) }}
+  OPENWRT_PATH: ${{ github.workspace }}/openwrt
+  TEMP_DIR: ${{ github.workspace }}/temp
+  LOG_DIR: ${{ github.workspace }}/logs
+  PACKAGE_DIR: ${{ github.workspace }}/packages
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+
+jobs:
+  # 预编译阶段：基于Ultra配置编译完整luci缓存（架构级别）- 独立运行
+  prebuild-luci-ultra:
+    runs-on: ubuntu-22.04
+    outputs:
+      luci-cache-key: ${{ steps.cache-luci.outputs.key }}
+      download-cache-key: ${{ steps.cache-download.outputs.key }}
+      ccache-cache-key: ${{ steps.cache-ccache.outputs.key }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          # 确保检出所有文件和历史
+          fetch-depth: 0
+          # 确保检出所有分支
+          fetch-tags: true
+
+      - name: 验证配置文件存在
+        run: |
+          echo "🔍 验证配置文件存在..."
+          # 切换到仓库根目录
+          cd ${{ github.workspace }}
+          
+          # 列出所有文件和目录
+          echo "当前目录内容："
+          ls -la
+          
+          # 检查configs目录
+          if [ -d "configs" ]; then
+            echo "configs目录存在，内容："
+            ls -la configs/
+          else
+            echo "❌ configs目录不存在"
+            exit 1
+          fi
+          
+          # 检查具体配置文件
+          if [ -f "configs/base_ipq60xx.config" ]; then
+            echo "✅ configs/base_ipq60xx.config 存在"
+          else
+            echo "❌ configs/base_ipq60xx.config 不存在"
+            exit 1
+          fi
+          
+          if [ -f "configs/base_immwrt.config" ]; then
+            echo "✅ configs/base_immwrt.config 存在"
+          else
+            echo "❌ configs/base_immwrt.config 不存在"
+            exit 1
+          fi
+          
+          if [ -f "configs/Ultra.config" ]; then
+            echo "✅ configs/Ultra.config 存在"
+          else
+            echo "❌ configs/Ultra.config 不存在"
+            exit 1
+          fi
+
+      - name: 创建目录结构
+        run: |
+          # 创建必要的目录结构，用于存放源码、缓存和日志
+          mkdir -p ${{ env.OPENWRT_PATH }}
+          mkdir -p ${{ env.TEMP_DIR }}
+          mkdir -p ${{ env.LOG_DIR }}
+          mkdir -p ${{ env.PACKAGE_DIR }}
+          mkdir -p ${{ env.CCACHE_DIR }}
+
+      - name: 下载主源码（使用immortalwrt作为基础）
+        run: |
+          echo "🚀 下载immortalwrt源码用于预编译..."
+          # 修改：使用immortalwrt仓库替代openwrt
+          git clone ${{ env.REPO_URL_IMMORTALWRT }} ${{ env.OPENWRT_PATH }}
+          cd ${{ env.OPENWRT_PATH }}
+          git checkout master
+          echo "✅ immortalwrt源码下载完成"
+
+      - name: 复制配置文件到源码目录
+        run: |
+          echo "📋 复制配置文件到源码目录..."
+          # 确保配置文件在源码目录中可用
+          cp -r ${{ github.workspace }}/configs ${{ env.OPENWRT_PATH }}/
+          
+          # 验证复制是否成功
+          cd ${{ env.OPENWRT_PATH }}
+          if [ -f "configs/base_ipq60xx.config" ]; then
+            echo "✅ 配置文件复制成功"
+          else
+            echo "❌ 配置文件复制失败"
+            exit 1
+          fi
+
+      - name: 生成缓存键
+        id: cache-keys
+        run: |
+          # 生成唯一的缓存键，用于区分不同配置的缓存
+          # luci软件包缓存键（基于Ultra配置）
+          LUCI_CACHE_KEY="luci-packages-ultra-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ hashFiles('configs/*.config') }}"
+          echo "luci-key=$LUCI_CACHE_KEY" >> $GITHUB_OUTPUT
+          
+          # 下载缓存键（基于架构和包配置）
+          DOWNLOAD_CACHE_KEY="downloads-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ hashFiles('package/*/*/Makefile') }}"
+          echo "download-key=$DOWNLOAD_CACHE_KEY" >> $GITHUB_OUTPUT
+          
+          # ccache缓存键（基于架构）
+          CCACHE_CACHE_KEY="ccache-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}"
+          echo "ccache-key=$CCACHE_CACHE_KEY" >> $GITHUB_OUTPUT
+          
+          echo "luci缓存键: $LUCI_CACHE_KEY"
+          echo "下载缓存键: $DOWNLOAD_CACHE_KEY"
+          echo "ccache缓存键: $CCACHE_CACHE_KEY"
+
+      - name: 检查luci软件包缓存
+        id: cache-luci
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.OPENWRT_PATH }}/staging_dir
+            ${{ env.OPENWRT_PATH }}/build_dir
+            ${{ env.OPENWRT_PATH }}/logs
+          key: ${{ steps.cache-keys.outputs.luci-key }}
+
+      - name: 检查下载缓存
+        id: cache-download
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.OPENWRT_PATH }}/dl
+          key: ${{ steps.cache-keys.outputs.download-key }}
+
+      - name: 检查ccache缓存
+        id: cache-ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.cache-keys.outputs.ccache-key }}
+
+      - name: 显示缓存状态
+        run: |
+          echo "📊 缓存状态检查："
+          echo "luci软件包缓存: ${{ steps.cache-luci.outputs.cache-hit }}"
+          echo "下载缓存: ${{ steps.cache-download.outputs.cache-hit }}"
+          echo "ccache缓存: ${{ steps.cache-ccache.outputs.cache-hit }}"
+
+      - name: 配置Ultra编译环境
+        if: steps.cache-luci.outputs.cache-hit != 'true'
+        run: |
+          echo "⚙️ 配置immortalwrt的Ultra编译环境（用于完整luci缓存）..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 验证当前目录和配置文件
+          echo "当前工作目录: $(pwd)"
+          echo "configs目录内容:"
+          ls -la configs/
+          
+          # 合并完整Ultra配置
+          cat configs/base_ipq60xx.config > .config
+          cat configs/base_immwrt.config >> .config  # 修改：使用immortalwrt基础配置
+          cat configs/Ultra.config >> .config
+          
+          # 启用ccache加速编译
+          echo "CONFIG_CCACHE=y" >> .config
+          
+          # 生成配置
+          make defconfig
+          echo "✅ immortalwrt的Ultra配置完成"
+
+      - name: 更新feeds（如果需要）
+        if: steps.cache-luci.outputs.cache-hit != 'true'
+        run: |
+          echo "🔄 更新immortalwrt的feeds..."
+          cd ${{ env.OPENWRT_PATH }}
+          # feeds是软件包源，需要更新以获取最新软件包列表
+          ./scripts/feeds update -a
+          echo "✅ immortalwrt的Feeds更新完成"
+
+      - name: 下载所有源码包（如果需要）
+        if: steps.cache-download.outputs.cache-hit != 'true'
+        run: |
+          echo "📥 下载所有源码包..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 设置ccache缓存目录和大小限制
+          export CCACHE_DIR=${{ env.CCACHE_DIR }}
+          export CCACHE_MAXSIZE=4G
+          
+          # 下载所有依赖包，避免编译过程中因缺少依赖而失败
+          make download -j$(nproc)
+          echo "✅ 源码包下载完成"
+
+      - name: 预编译Ultra配置的luci软件包（如果需要）
+        if: steps.cache-luci.outputs.cache-hit != 'true'
+        run: |
+          echo "🔨 预编译immortalwrt的Ultra配置luci软件包（完整缓存）..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 设置ccache缓存目录和大小限制
+          export CCACHE_DIR=${{ env.CCACHE_DIR }}
+          export CCACHE_MAXSIZE=4G
+          
+          # 编译所有luci软件包（基于Ultra配置）
+          echo "开始编译immortalwrt的Ultra配置的所有luci软件包..."
+          
+          # 获取Ultra配置中的所有luci包
+          LUCI_PACKAGES=$(grep "^CONFIG_PACKAGE_luci-" .config | sed 's/CONFIG_PACKAGE_\(.*\)=y/\1/')
+          
+          # 逐个编译luci包，包括其依赖和汉化包
+          for package in $LUCI_PACKAGES; do
+            echo "编译immortalwrt的Ultra luci包: $package"
+            make package/$package/compile -j$(nproc) || true
+            echo "✅ $package 编译完成（包括依赖和汉化包）"
+          done
+          
+          # 额外编译feeds中的luci包
+          for package in $(find feeds/luci/packages -name "Makefile" | grep -v "/src/" | sed 's|/Makefile||g'); do
+            if [ -d "$package" ]; then
+                pkg_name=$(basename "$package")
+                echo "编译immortalwrt的feeds luci包: $pkg_name"
+                make package/$pkg_name/compile -j$(nproc) || true
+                echo "✅ $pkg_name 编译完成"
+            fi
+          done
+          
+          echo "✅ immortalwrt的Ultra配置luci软件包预编译完成"
+
+      - name: 保存luci软件包缓存
+        if: steps.cache-luci.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.OPENWRT_PATH }}/staging_dir
+            ${{ env.OPENWRT_PATH }}/build_dir
+            ${{ env.OPENWRT_PATH }}/logs
+          key: ${{ steps.cache-keys.outputs.luci-key }}
+
+      - name: 保存下载缓存
+        if: steps.cache-download.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.OPENWRT_PATH }}/dl
+          key: ${{ steps.cache-keys.outputs.download-key }}
+
+      - name: 保存ccache缓存
+        if: steps.cache-ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.cache-keys.outputs.ccache-key }}
+
+  # 准备阶段：下载源码、配置基础系统（分支级别）- 独立运行
+  prepare:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        source_repo: [openwrt, immortalwrt, libwrt]
+    outputs:
+      cache-key-base: ${{ steps.cache-key-base.outputs.key }}
+      cache-key-toolchain: ${{ steps.cache-key-toolchain.outputs.key }}
+      devices: ${{ steps.get-devices.outputs.devices }}
+      kernel-version: ${{ steps.get-kernel.outputs.version }}
+      repo-url: ${{ steps.set-env.outputs.repo-url }}
+      branch-name: ${{ steps.set-env.outputs.branch-name }}
+      branch-abbr: ${{ steps.set-env.outputs.branch-abbr }}
+      source-repo: ${{ matrix.source_repo }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          # 确保检出所有文件和历史
+          fetch-depth: 0
+          # 确保检出所有分支
+          fetch-tags: true
+
+      - name: 验证配置文件存在
+        run: |
+          echo "🔍 验证配置文件存在..."
+          # 切换到仓库根目录
+          cd ${{ github.workspace }}
+          
+          # 列出所有文件和目录
+          echo "当前目录内容："
+          ls -la
+          
+          # 检查configs目录
+          if [ -d "configs" ]; then
+            echo "configs目录存在，内容："
+            ls -la configs/
+          else
+            echo "❌ configs目录不存在"
+            exit 1
+          fi
+
+      - name: 设置环境变量
+        id: set-env
+        run: |
+          # 根据不同的源码仓库设置相应的URL和分支
+          case "${{ matrix.source_repo }}" in
+            "openwrt") 
+              REPO_URL="${{ env.REPO_URL_OPENWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="openwrt"
+              BASE_CONFIG="base_openwrt"
+              ;;
+            "immortalwrt") 
+              REPO_URL="${{ env.REPO_URL_IMMORTALWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="immwrt"
+              BASE_CONFIG="base_immwrt"
+              ;;
+            "libwrt") 
+              REPO_URL="${{ env.REPO_URL_LIBWRT }}"
+              BRANCH_NAME="k6.12-nss"
+              BRANCH_ABBR="libwrt"
+              BASE_CONFIG="base_libwrt"
+              ;;
+          esac
+          
+          echo "repo-url=$REPO_URL" >> $GITHUB_OUTPUT
+          echo "branch-name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "branch-abbr=$BRANCH_ABBR" >> $GITHUB_OUTPUT
+          echo "base-config=$BASE_CONFIG" >> $GITHUB_OUTPUT
+          
+          # 设置全局环境变量
+          echo "REPO_URL=$REPO_URL" >> $GITHUB_ENV
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          echo "BRANCH_ABBR=$BRANCH_ABBR" >> $GITHUB_ENV
+          echo "BASE_CONFIG=$BASE_CONFIG" >> $GITHUB_ENV
+          echo "SOURCE_REPO=${{ matrix.source_repo }}" >> $GITHUB_ENV
+          echo "VERSION_KERNEL=$(date +%Y.%m)" >> $GITHUB_ENV
+          echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+          
+          echo "仓库URL: $REPO_URL"
+          echo "分支名称: $BRANCH_NAME"
+          echo "分支缩写: $BRANCH_ABBR"
+          echo "基础配置: $BASE_CONFIG"
+
+      - name: 生成各阶段缓存键
+        id: cache-key-base
+        run: |
+          # 基础系统缓存键（分支级别）
+          BASE_CACHE_KEY="${{ matrix.source_repo }}-${{ env.BRANCH_NAME }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-base-${{ hashFiles('configs/*.config') }}"
+          echo "key=$BASE_CACHE_KEY" >> $GITHUB_OUTPUT
+          
+          # 工具链缓存键（分支级别）
+          TOOLCHAIN_CACHE_KEY="${{ matrix.source_repo }}-${{ env.BRANCH_NAME }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-toolchain-${{ hashFiles('include/toolchain/*') }}"
+          echo "toolchain-key=$TOOLCHAIN_CACHE_KEY" >> $GITHUB_OUTPUT
+          
+          echo "基础系统缓存键: $BASE_CACHE_KEY"
+          echo "工具链缓存键: $TOOLCHAIN_CACHE_KEY"
+
+      - name: 检查并恢复基础系统缓存
+        id: restore-cache-base
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.OPENWRT_PATH }}
+            ${{ env.TEMP_DIR }}
+          key: ${{ steps.cache-key-base.outputs.key }}
+          restore-keys: |
+            ${{ matrix.source_repo }}-${{ env.BRANCH_NAME }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-base-
+
+      - name: 检查工具链缓存
+        id: restore-cache-toolchain
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.OPENWRT_PATH }}/staging_dir/host
+            ${{ env.OPENWRT_PATH }}/staging_dir/toolchain-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
+          key: ${{ steps.cache-key-toolchain.outputs.key }}
+
+      - name: 创建目录结构
+        run: |
+          # 创建必要的目录结构
+          mkdir -p ${{ env.OPENWRT_PATH }}
+          mkdir -p ${{ env.TEMP_DIR }}
+          mkdir -p ${{ env.LOG_DIR }}
+          mkdir -p ${{ env.PACKAGE_DIR }}
+          mkdir -p ${{ env.CCACHE_DIR }}
+
+      - name: 下载源码
+        if: steps.restore-cache-base.outputs.cache-hit != 'true'
+        run: |
+          echo "🚀 开始下载源码..."
+          # 下载对应仓库的源码
+          git clone ${{ env.REPO_URL }} ${{ env.OPENWRT_PATH }}
+          cd ${{ env.OPENWRT_PATH }}
+          git checkout ${{ env.BRANCH_NAME }}
+          echo "✅ 源码下载完成"
+
+      - name: 复制配置文件到源码目录
+        if: steps.restore-cache-base.outputs.cache-hit != 'true'
+        run: |
+          echo "📋 复制配置文件到源码目录..."
+          # 确保配置文件在源码目录中可用
+          cp -r ${{ github.workspace }}/configs ${{ env.OPENWRT_PATH }}/
+          
+          # 验证复制是否成功
+          cd ${{ env.OPENWRT_PATH }}
+          if [ -f "configs/base_ipq60xx.config" ]; then
+            echo "✅ 配置文件复制成功"
+          else
+            echo "❌ 配置文件复制失败"
+            exit 1
+          fi
+
+      - name: 合并基础配置文件
+        run: |
+          echo "🔧 开始合并基础配置文件..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 验证当前目录和配置文件
+          echo "当前工作目录: $(pwd)"
+          echo "configs目录内容:"
+          ls -la configs/
+          
+          # 合并基础配置文件（不包含Pro/Max/Ultra）
+          cat configs/base_ipq60xx.config > .config
+          cat configs/${{ env.BASE_CONFIG }}.config >> .config
+          
+          # 启用ccache
+          echo "CONFIG_CCACHE=y" >> .config
+          
+          # 生成配置
+          make defconfig
+          echo "✅ 基础配置文件合并完成"
+
+      - name: 获取设备列表
+        id: get-devices
+        run: |
+          echo "📋 获取设备列表..."
+          cd ${{ env.OPENWRT_PATH }}
+          # 从配置文件中提取设备列表
+          DEVICES=$(grep -oE 'CONFIG_TARGET_DEVICE_.*_DEVICE_[^=]+=y' .config | sed -E 's/.*DEVICE_([^=]+)=y/\1/' | tr '\n' ' ')
+          echo "devices=$DEVICES" >> $GITHUB_OUTPUT
+          echo "检测到的设备: $DEVICES"
+
+      - name: 获取内核版本
+        id: get-kernel
+        run: |
+          echo "🔍 获取内核版本..."
+          cd ${{ env.OPENWRT_PATH }}
+          # 从配置文件中提取内核版本
+          VERSION=$(grep 'CONFIG_KERNEL_' .config | head -1 | cut -d'=' -f2 | tr -d '"')
+          if [ -z "$VERSION" ]; then
+            VERSION="6.12"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "内核版本: $VERSION"
+
+      - name: 预编译工具链（如果需要）
+        if: steps.restore-cache-toolchain.outputs.cache-hit != 'true'
+        run: |
+          echo "🔨 预编译工具链..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 设置ccache
+          export CCACHE_DIR=${{ env.CCACHE_DIR }}
+          export CCACHE_MAXSIZE=4G
+          
+          # 编译工具链，工具链是编译固件的基础
+          make toolchain/install -j$(nproc) 2>&1 | tee toolchain_build.log
+          echo "✅ 工具链编译完成"
+
+      - name: 保存工具链缓存
+        if: steps.restore-cache-toolchain.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.OPENWRT_PATH }}/staging_dir/host
+            ${{ env.OPENWRT_PATH }}/staging_dir/toolchain-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
+          key: ${{ steps.cache-key-toolchain.outputs.key }}
+
+      - name: 运行DIY脚本
+        run: |
+          echo "🛠️ 运行DIY脚本..."
+          cd ${{ env.OPENWRT_PATH }}
+          # DIY脚本用于自定义修改源码
+          chmod +x scripts/diy.sh
+          ./scripts/diy.sh ${{ env.OPENWRT_PATH }}
+          echo "✅ DIY脚本执行完成"
+
+      - name: 更新 feeds
+        if: steps.restore-cache-base.outputs.cache-hit != 'true'
+        run: |
+          echo "🔄 更新 feeds..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 确保feeds目录存在
+          mkdir -p feeds/packages feeds/luci feeds/routing feeds/telephony feeds/management
+          
+          # 更新feeds，获取最新的软件包列表
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          echo "✅ Feeds 更新完成"
+
+      - name: 保存基础系统缓存
+        if: steps.restore-cache-base.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.OPENWRT_PATH }}
+            ${{ env.TEMP_DIR }}
+          key: ${{ steps.cache-key-base.outputs.key }}
+
+  # 基础系统编译阶段（分支级别）- 独立运行
+  build-base:
+    needs: prepare
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        source_repo: [openwrt, immortalwrt, libwrt]
+    outputs:
+      build-status: ${{ steps.compile.outputs.status }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          # 确保检出所有文件和历史
+          fetch-depth: 0
+          # 确保检出所有分支
+          fetch-tags: true
+
+      - name: 设置环境变量
+        run: |
+          # 根据不同的源码仓库设置相应的URL和分支
+          case "${{ matrix.source_repo }}" in
+            "openwrt") 
+              REPO_URL="${{ env.REPO_URL_OPENWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="openwrt"
+              ;;
+            "immortalwrt") 
+              REPO_URL="${{ env.REPO_URL_IMMORTALWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="immwrt"
+              ;;
+            "libwrt") 
+              REPO_URL="${{ env.REPO_URL_LIBWRT }}"
+              BRANCH_NAME="k6.12-nss"
+              BRANCH_ABBR="libwrt"
+              ;;
+          esac
+          
+          echo "REPO_URL=$REPO_URL" >> $GITHUB_ENV
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          echo "BRANCH_ABBR=$BRANCH_ABBR" >> $GITHUB_ENV
+          echo "SOURCE_REPO=${{ matrix.source_repo }}" >> $GITHUB_ENV
+          echo "VERSION_KERNEL=$(date +%Y.%m)" >> $GITHUB_ENV
+          echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+
+      - name: 恢复基础系统缓存
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.OPENWRT_PATH }}
+            ${{ env.TEMP_DIR }}
+          key: ${{ needs.prepare.outputs.cache-key-base }}
+
+      - name: 创建目录结构
+        run: |
+          # 创建必要的目录结构
+          mkdir -p ${{ env.LOG_DIR }}
+          mkdir -p ${{ env.PACKAGE_DIR }}
+
+      - name: 设置编译环境
+        run: |
+          echo "⚙️ 设置基础系统编译环境..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 设置其他配置
+          echo "CONFIG_USE_APK=n" >> .config
+          
+          # 启用ccache
+          echo "CONFIG_CCACHE=y" >> .config
+          
+          # 设置ccache目录
+          export CCACHE_DIR=${{ env.CCACHE_DIR }}
+          export CCACHE_MAXSIZE=4G
+          
+          # 生成配置
+          make defconfig
+          echo "✅ 基础系统编译环境设置完成"
+
+      - name: 下载依赖
+        run: |
+          echo "📥 下载依赖..."
+          cd ${{ env.OPENWRT_PATH }}
+          # 下载编译所需的依赖包
+          make download -j$(nproc)
+          echo "✅ 依赖下载完成"
+
+      - name: 编译基础系统
+        id: compile
+        run: |
+          echo "🔨 开始编译基础系统..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 设置错误处理
+          set -e
+          trap 'echo "❌ 基础系统编译失败，记录错误日志..."; tail -1000 build_log.txt > ${{ env.LOG_DIR }}/base_error.log; exit 1' ERR
+          
+          # 开始编译并记录日志
+          make -j$(nproc) 2>&1 | tee build_log.txt
+          
+          echo "✅ 基础系统编译完成"
+          echo "status=success" >> $GITHUB_OUTPUT
+
+  # 同步阶段：等待prebuild-luci-ultra和build-base都完成
+  sync-cache:
+    needs: [prebuild-luci-ultra, build-base]
+    runs-on: ubuntu-22.04
+    outputs:
+      luci-cache-key: ${{ needs.prebuild-luci-ultra.outputs.luci-cache-key }}
+      download-cache-key: ${{ needs.prebuild-luci-ultra.outputs.download-cache-key }}
+      ccache-cache-key: ${{ needs.prebuild-luci-ultra.outputs.ccache-cache-key }}
+      build-status: ${{ needs.build-base.outputs.build-status }}
+    steps:
+      - name: 同步缓存状态
+        run: |
+          echo "🔄 同步缓存状态..."
+          echo "luci缓存键: ${{ needs.prebuild-luci-ultra.outputs.luci-cache-key }}"
+          echo "下载缓存键: ${{ needs.prebuild-luci-ultra.outputs.download-cache-key }}"
+          echo "ccache缓存键: ${{ needs.prebuild-luci-ultra.outputs.ccache-cache-key }}"
+          echo "基础系统编译状态: ${{ needs.build-base.outputs.build-status }}"
+          echo "✅ 缓存同步完成"
+
+  # Pro配置编译阶段（设备级别）- 依赖sync-cache
+  build-pro:
+    needs: [prepare, sync-cache]
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        source_repo: [openwrt, immortalwrt, libwrt]
+        device: ${{ fromJson(needs.prepare.outputs.devices) }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          # 确保检出所有文件和历史
+          fetch-depth: 0
+          # 确保检出所有分支
+          fetch-tags: true
+
+      - name: 设置环境变量
+        run: |
+          # 根据不同的源码仓库设置相应的URL和分支
+          case "${{ matrix.source_repo }}" in
+            "openwrt") 
+              REPO_URL="${{ env.REPO_URL_OPENWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="openwrt"
+              ;;
+            "immortalwrt") 
+              REPO_URL="${{ env.REPO_URL_IMMORTALWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="immwrt"
+              ;;
+            "libwrt") 
+              REPO_URL="${{ env.REPO_URL_LIBWRT }}"
+              BRANCH_NAME="k6.12-nss"
+              BRANCH_ABBR="libwrt"
+              ;;
+          esac
+          
+          echo "REPO_URL=$REPO_URL" >> $GITHUB_ENV
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          echo "BRANCH_ABBR=$BRANCH_ABBR" >> $GITHUB_ENV
+          echo "SOURCE_REPO=${{ matrix.source_repo }}" >> $GITHUB_ENV
+          echo "VERSION_KERNEL=$(date +%Y.%m)" >> $GITHUB_ENV
+          echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+          echo "CONFIG_TYPE=Pro" >> $GITHUB_ENV
+
+      - name: 检查基础系统编译状态
+        run: |
+          # 检查基础系统是否编译成功
+          if [ "${{ needs.sync-cache.outputs.build-status }}" != "success" ]; then
+            echo "❌ 基础系统编译失败，跳过Pro配置编译"
+            exit 1
+          fi
+
+      - name: 恢复基础系统缓存
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.OPENWRT_PATH }}
+            ${{ env.TEMP_DIR }}
+          key: ${{ needs.prepare.outputs.cache-key-base }}
+
+      - name: 恢复Ultra luci缓存和ccache
+        run: |
+          echo "🔄 恢复Ultra luci缓存和ccache..."
+          
+          # 恢复ccache
+          if [ ! -d "${{ env.CCACHE_DIR }}" ]; then
+            mkdir -p ${{ env.CCACHE_DIR }}
+          fi
+          
+          echo "✅ 缓存恢复完成"
+
+      - name: 创建目录结构
+        run: |
+          # 创建必要的目录结构
+          mkdir -p ${{ env.LOG_DIR }}
+          mkdir -p ${{ env.PACKAGE_DIR }}
+
+      - name: 合并Pro配置
+        run: |
+          echo "🔧 合并Pro配置..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 合并Pro配置
+          cat configs/Pro.config >> .config
+          
+          # 启用ccache
+          echo "CONFIG_CCACHE=y" >> .config
+          
+          # 设置ccache目录
+          export CCACHE_DIR=${{ env.CCACHE_DIR }}
+          export CCACHE_MAXSIZE=4G
+          
+          # 生成配置
+          make defconfig
+          echo "✅ Pro配置合并完成"
+
+      - name: 编译Pro配置固件
+        run: |
+          echo "🔨 开始编译Pro配置固件: ${{ matrix.device }}..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 设置设备配置
+          sed -i "s/CONFIG_TARGET_DEVICE_.*_DEVICE_.*/CONFIG_TARGET_DEVICE_${{ env.DEVICE_TARGET }}_${{ env.DEVICE_SUBTARGET }}_DEVICE_${{ matrix.device }}=y/" .config
+          
+          # 生成配置
+          make defconfig
+          
+          # 设置错误处理
+          set -e
+          trap 'echo "❌ Pro配置编译失败，记录错误日志..."; tail -1000 build_log.txt > ${{ env.LOG_DIR }}/${{ matrix.device }}_pro_error.log; exit 1' ERR
+          
+          # 开始编译并记录日志
+          make -j$(nproc) 2>&1 | tee build_log.txt
+          
+          echo "✅ Pro配置固件编译完成: ${{ matrix.device }}"
+
+      - name: 整理Pro配置产出物
+        run: |
+          echo "📦 整理Pro配置产出物..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 创建设备临时目录
+          DEVICE_TEMP_DIR="${{ env.TEMP_DIR }}/pro/${{ matrix.source_repo }}/${{ matrix.device }}"
+          mkdir -p $DEVICE_TEMP_DIR
+          
+          # 复制并重命名固件
+          for file in bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/*${{ env.DEVICE_SUBTARGET }}*${{ matrix.device }}*squashfs-*.bin; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              if [[ "$filename" =~ "factory.bin" ]]; then
+                new_name="${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-factory-Pro.bin"
+              elif [[ "$filename" =~ "sysupgrade.bin" ]]; then
+                new_name="${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-sysupgrade-Pro.bin"
+              fi
+              cp "$file" "$DEVICE_TEMP_DIR/$new_name"
+              echo "Pro固件重命名: $filename -> $new_name"
+            fi
+          done
+          
+          # 复制并重命名配置文件
+          if [ -f ".config" ]; then
+            cp .config "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Pro.config"
+          fi
+          
+          # 复制并重命名清单文件
+          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" ]; then
+            cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" \
+               "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Pro.manifest"
+          fi
+          
+          # 复制并重命名构建信息
+          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/config.buildinfo" ]; then
+            cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/config.buildinfo" \
+               "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Pro.config.buildinfo"
+          fi
+          
+          # 复制日志
+          if [ -f "build_log.txt" ]; then
+            cp build_log.txt "$DEVICE_TEMP_DIR/${{ matrix.device }}_pro_build.log"
+          fi
+          
+          echo "✅ Pro配置产出物整理完成: ${{ matrix.device }}"
+
+      - name: 上传Pro配置产出物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.source_repo }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Pro
+          path: ${{ env.TEMP_DIR }}/pro/${{ matrix.source_repo }}/${{ matrix.device }}
+          retention-days: 7
+
+  # Max配置编译阶段（设备级别）- 依赖sync-cache
+  build-max:
+    needs: [prepare, sync-cache]
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        source_repo: [openwrt, immortalwrt, libwrt]
+        device: ${{ fromJson(needs.prepare.outputs.devices) }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          # 确保检出所有文件和历史
+          fetch-depth: 0
+          # 确保检出所有分支
+          fetch-tags: true
+
+      - name: 设置环境变量
+        run: |
+          # 根据不同的源码仓库设置相应的URL和分支
+          case "${{ matrix.source_repo }}" in
+            "openwrt") 
+              REPO_URL="${{ env.REPO_URL_OPENWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="openwrt"
+              ;;
+            "immortalwrt") 
+              REPO_URL="${{ env.REPO_URL_IMMORTALWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="immwrt"
+              ;;
+            "libwrt") 
+              REPO_URL="${{ env.REPO_URL_LIBWRT }}"
+              BRANCH_NAME="k6.12-nss"
+              BRANCH_ABBR="libwrt"
+              ;;
+          esac
+          
+          echo "REPO_URL=$REPO_URL" >> $GITHUB_ENV
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          echo "BRANCH_ABBR=$BRANCH_ABBR" >> $GITHUB_ENV
+          echo "SOURCE_REPO=${{ matrix.source_repo }}" >> $GITHUB_ENV
+          echo "VERSION_KERNEL=$(date +%Y.%m)" >> $GITHUB_ENV
+          echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+          echo "CONFIG_TYPE=Max" >> $GITHUB_ENV
+
+      - name: 检查基础系统编译状态
+        run: |
+          # 检查基础系统是否编译成功
+          if [ "${{ needs.sync-cache.outputs.build-status }}" != "success" ]; then
+            echo "❌ 基础系统编译失败，跳过Max配置编译"
+            exit 1
+          fi
+
+      - name: 恢复基础系统缓存
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.OPENWRT_PATH }}
+            ${{ env.TEMP_DIR }}
+          key: ${{ needs.prepare.outputs.cache-key-base }}
+
+      - name: 恢复Ultra luci缓存和ccache
+        run: |
+          echo "🔄 恢复Ultra luci缓存和ccache..."
+          
+          # 恢复ccache
+          if [ ! -d "${{ env.CCACHE_DIR }}" ]; then
+            mkdir -p ${{ env.CCACHE_DIR }}
+          fi
+          
+          echo "✅ 缓存恢复完成"
+
+      - name: 创建目录结构
+        run: |
+          # 创建必要的目录结构
+          mkdir -p ${{ env.LOG_DIR }}
+          mkdir -p ${{ env.PACKAGE_DIR }}
+
+      - name: 合并Max配置
+        run: |
+          echo "🔧 合并Max配置..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 合并Max配置
+          cat configs/Max.config >> .config
+          
+          # 启用ccache
+          echo "CONFIG_CCACHE=y" >> .config
+          
+          # 设置ccache目录
+          export CCACHE_DIR=${{ env.CCACHE_DIR }}
+          export CCACHE_MAXSIZE=4G
+          
+          # 生成配置
+          make defconfig
+          echo "✅ Max配置合并完成"
+
+      - name: 编译Max配置固件
+        run: |
+          echo "🔨 开始编译Max配置固件: ${{ matrix.device }}..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 设置设备配置
+          sed -i "s/CONFIG_TARGET_DEVICE_.*_DEVICE_.*/CONFIG_TARGET_DEVICE_${{ env.DEVICE_TARGET }}_${{ env.DEVICE_SUBTARGET }}_DEVICE_${{ matrix.device }}=y/" .config
+          
+          # 生成配置
+          make defconfig
+          
+          # 设置错误处理
+          set -e
+          trap 'echo "❌ Max配置编译失败，记录错误日志..."; tail -1000 build_log.txt > ${{ env.LOG_DIR }}/${{ matrix.device }}_max_error.log; exit 1' ERR
+          
+          # 开始编译并记录日志
+          make -j$(nproc) 2>&1 | tee build_log.txt
+          
+          echo "✅ Max配置固件编译完成: ${{ matrix.device }}"
+
+      - name: 整理Max配置产出物
+        run: |
+          echo "📦 整理Max配置产出物..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 创建设备临时目录
+          DEVICE_TEMP_DIR="${{ env.TEMP_DIR }}/max/${{ matrix.source_repo }}/${{ matrix.device }}"
+          mkdir -p $DEVICE_TEMP_DIR
+          
+          # 复制并重命名固件
+          for file in bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/*${{ env.DEVICE_SUBTARGET }}*${{ matrix.device }}*squashfs-*.bin; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              if [[ "$filename" =~ "factory.bin" ]]; then
+                new_name="${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-factory-Max.bin"
+              elif [[ "$filename" =~ "sysupgrade.bin" ]]; then
+                new_name="${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-sysupgrade-Max.bin"
+              fi
+              cp "$file" "$DEVICE_TEMP_DIR/$new_name"
+              echo "Max固件重命名: $filename -> $new_name"
+            fi
+          done
+          
+          # 复制并重命名配置文件
+          if [ -f ".config" ]; then
+            cp .config "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Max.config"
+          fi
+          
+          # 复制并重命名清单文件
+          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" ]; then
+            cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" \
+               "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Max.manifest"
+          fi
+          
+          # 复制并重命名构建信息
+          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/config.buildinfo" ]; then
+            cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/config.buildinfo" \
+               "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Max.config.buildinfo"
+          fi
+          
+          # 复制日志
+          if [ -f "build_log.txt" ]; then
+            cp build_log.txt "$DEVICE_TEMP_DIR/${{ matrix.device }}_max_build.log"
+          fi
+          
+          echo "✅ Max配置产出物整理完成: ${{ matrix.device }}"
+
+      - name: 上传Max配置产出物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.source_repo }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Max
+          path: ${{ env.TEMP_DIR }}/max/${{ matrix.source_repo }}/${{ matrix.device }}
+          retention-days: 7
+
+  # Ultra配置编译阶段（设备级别）- 依赖sync-cache
+  build-ultra:
+    needs: [prepare, sync-cache]
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        source_repo: [openwrt, immortalwrt, libwrt]
+        device: ${{ fromJson(needs.prepare.outputs.devices) }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          # 确保检出所有文件和历史
+          fetch-depth: 0
+          # 确保检出所有分支
+          fetch-tags: true
+
+      - name: 设置环境变量
+        run: |
+          # 根据不同的源码仓库设置相应的URL和分支
+          case "${{ matrix.source_repo }}" in
+            "openwrt") 
+              REPO_URL="${{ env.REPO_URL_OPENWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="openwrt"
+              ;;
+            "immortalwrt") 
+              REPO_URL="${{ env.REPO_URL_IMMORTALWRT }}"
+              BRANCH_NAME="master"
+              BRANCH_ABBR="immwrt"
+              ;;
+            "libwrt") 
+              REPO_URL="${{ env.REPO_URL_LIBWRT }}"
+              BRANCH_NAME="k6.12-nss"
+              BRANCH_ABBR="libwrt"
+              ;;
+          esac
+          
+          echo "REPO_URL=$REPO_URL" >> $GITHUB_ENV
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          echo "BRANCH_ABBR=$BRANCH_ABBR" >> $GITHUB_ENV
+          echo "SOURCE_REPO=${{ matrix.source_repo }}" >> $GITHUB_ENV
+          echo "VERSION_KERNEL=$(date +%Y.%m)" >> $GITHUB_ENV
+          echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+          echo "CONFIG_TYPE=Ultra" >> $GITHUB_ENV
+
+      - name: 检查基础系统编译状态
+        run: |
+          # 检查基础系统是否编译成功
+          if [ "${{ needs.sync-cache.outputs.build-status }}" != "success" ]; then
+            echo "❌ 基础系统编译失败，跳过Ultra配置编译"
+            exit 1
+          fi
+
+      - name: 恢复基础系统缓存
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.OPENWRT_PATH }}
+            ${{ env.TEMP_DIR }}
+          key: ${{ needs.prepare.outputs.cache-key-base }}
+
+      - name: 恢复Ultra luci缓存和ccache
+        run: |
+          echo "🔄 恢复Ultra luci缓存和ccache..."
+          
+          # 恢复ccache
+          if [ ! -d "${{ env.CCACHE_DIR }}" ]; then
+            mkdir -p ${{ env.CCACHE_DIR }}
+          fi
+          
+          echo "✅ 缓存恢复完成"
+
+      - name: 创建目录结构
+        run: |
+          # 创建必要的目录结构
+          mkdir -p ${{ env.LOG_DIR }}
+          mkdir -p ${{ env.PACKAGE_DIR }}
+
+      - name: 合并Ultra配置
+        run: |
+          echo "🔧 合并Ultra配置..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 合并Ultra配置
+          cat configs/Ultra.config >> .config
+          
+          # 启用ccache
+          echo "CONFIG_CCACHE=y" >> .config
+          
+          # 设置ccache目录
+          export CCACHE_DIR=${{ env.CCACHE_DIR }}
+          export CCACHE_MAXSIZE=4G
+          
+          # 生成配置
+          make defconfig
+          echo "✅ Ultra配置合并完成"
+
+      - name: 编译Ultra配置固件
+        run: |
+          echo "🔨 开始编译Ultra配置固件: ${{ matrix.device }}..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 设置设备配置
+          sed -i "s/CONFIG_TARGET_DEVICE_.*_DEVICE_.*/CONFIG_TARGET_DEVICE_${{ env.DEVICE_TARGET }}_${{ env.DEVICE_SUBTARGET }}_DEVICE_${{ matrix.device }}=y/" .config
+          
+          # 生成配置
+          make defconfig
+          
+          # 设置错误处理
+          set -e
+          trap 'echo "❌ Ultra配置编译失败，记录错误日志..."; tail -1000 build_log.txt > ${{ env.LOG_DIR }}/${{ matrix.device }}_ultra_error.log; exit 1' ERR
+          
+          # 开始编译并记录日志
+          make -j$(nproc) 2>&1 | tee build_log.txt
+          
+          echo "✅ Ultra配置固件编译完成: ${{ matrix.device }}"
+
+      - name: 整理Ultra配置产出物
+        run: |
+          echo "📦 整理Ultra配置产出物..."
+          cd ${{ env.OPENWRT_PATH }}
+          
+          # 创建设备临时目录
+          DEVICE_TEMP_DIR="${{ env.TEMP_DIR }}/ultra/${{ matrix.source_repo }}/${{ matrix.device }}"
+          mkdir -p $DEVICE_TEMP_DIR
+          
+          # 复制并重命名固件
+          for file in bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/*${{ env.DEVICE_SUBTARGET }}*${{ matrix.device }}*squashfs-*.bin; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              if [[ "$filename" =~ "factory.bin" ]]; then
+                new_name="${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-factory-Ultra.bin"
+              elif [[ "$filename" =~ "sysupgrade.bin" ]]; then
+                new_name="${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-sysupgrade-Ultra.bin"
+              fi
+              cp "$file" "$DEVICE_TEMP_DIR/$new_name"
+              echo "Ultra固件重命名: $filename -> $new_name"
+            fi
+          done
+          
+          # 复制并重命名配置文件
+          if [ -f ".config" ]; then
+            cp .config "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Ultra.config"
+          fi
+          
+          # 复制并重命名清单文件
+          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" ]; then
+            cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/${{ matrix.source_repo }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}.manifest" \
+               "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Ultra.manifest"
+          fi
+          
+          # 复制并重命名构建信息
+          if [ -f "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/config.buildinfo" ]; then
+            cp "bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/config.buildinfo" \
+               "$DEVICE_TEMP_DIR/${{ env.BRANCH_ABBR }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Ultra.config.buildinfo"
+          fi
+          
+          # 复制日志
+          if [ -f "build_log.txt" ]; then
+            cp build_log.txt "$DEVICE_TEMP_DIR/${{ matrix.device }}_ultra_build.log"
+          fi
+          
+          echo "✅ Ultra配置产出物整理完成: ${{ matrix.device }}"
+
+      - name: 上传Ultra配置产出物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.source_repo }}-${{ env.DEVICE_SUBTARGET }}-${{ matrix.device }}-Ultra
+          path: ${{ env.TEMP_DIR }}/ultra/${{ matrix.source_repo }}/${{ matrix.device }}
+          retention-days: 7
+
+  # 汇总阶段：整理所有产出物并发布
+  publish:
+    needs: [sync-cache, build-pro, build-max, build-ultra]
+    runs-on: ubuntu-22.04
+    if: github.event.inputs.release == 'true'
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          # 确保检出所有文件和历史
+          fetch-depth: 0
+          # 确保检出所有分支
+          fetch-tags: true
+
+      - name: 设置环境变量
+        run: |
+          echo "VERSION_KERNEL=$(date +%Y.%m)" >> $GITHUB_ENV
+          echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+
+      - name: 创建目录结构
+        run: |
+          # 创建必要的目录结构
+          mkdir -p ${{ env.TEMP_DIR }}
+          mkdir -p ${{ env.LOG_DIR }}
+          mkdir -p ${{ env.PACKAGE_DIR }}
+
+      - name: 下载所有产出物
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ env.TEMP_DIR }}/artifacts
+
+      - name: 整理产出物
+        run: |
+          echo "📦 整理所有产出物..."
+          
+          # 创建最终目录结构
+          FINAL_DIR="${{ env.TEMP_DIR }}/final"
+          mkdir -p $FINAL_DIR
+          
+          # 合并所有设备产出物
+          for config_type in pro max ultra; do
+            for source_repo in openwrt immortalwrt libwrt; do
+              for device_dir in ${{ env.TEMP_DIR }}/artifacts/${source_repo}-${{ env.DEVICE_SUBTARGET }}-*-${config_type}/*; do
+                if [ -d "$device_dir" ]; then
+                  echo "处理仓库: $source_repo, 配置: $config_type, 设备: $(basename $device_dir)"
+                  
+                  # 复制所有文件到最终目录
+                  cp -r "$device_dir"/* "$FINAL_DIR/"
+                fi
+              done
+            done
+          done
+          
+          # 打包配置文件
+          cd $FINAL_DIR
+          tar -zcf ${{ env.DEVICE_SUBTARGET }}-config.tar.gz *.config
+          
+          # 打包日志文件
+          tar -zcf ${{ env.DEVICE_SUBTARGET }}-log.tar.gz *_build.log *_error.log 2>/dev/null || true
+          
+          # 创建软件包列表
+          ls -la > ${{ env.TEMP_DIR }}/final/package_list.txt
+          
+          echo "✅ 产出物整理完成"
+
+      - name: 生成Release说明
+        run: |
+          echo "📝 生成Release说明..."
+          
+          # 创建Release说明
+          cat > ${{ env.TEMP_DIR }}/release_notes.md << EOF
+          # OpenWrt 固件发布
+          
+          ## 📒 固件信息
+          - 这是分步式编译的固件，包含Pro、Max、Ultra三种配置
+          - 💻 这是 ${{ env.DEVICE_SUBTARGET }} 平台使用的 OpenWrt 固件
+          - 🌐 默认地址: **192.168.111.1**
+          - 🔑 默认密码: none
+          - 📶 默认WIFI密码: 12345678
+          
+          ## 🧊 固件版本
+          - 固件内核版本：**${{ env.VERSION_KERNEL }}**
+          - ${{ env.VERSION_INFO }}
+          
+          ## 📋 包含的软件包
+          \`\`\`
+          $(cat ${{ env.TEMP_DIR }}/final/package_list.txt)
+          \`\`\`
+          
+          ## 📥 下载说明
+          - 固件文件命名规则: 分支缩写-芯片-设备-类型-配置.bin
+          - 例如: openwrt-ipq60xx-jdcloud_re-ss-01-sysupgrade-Pro.bin
+          
+          ---
+          作者: Mary
+          发布时间: $(date '+%Y-%m-%d %H:%M:%S')
+          EOF
+          
+          echo "✅ Release说明生成完成"
+
+      - name: 发布到Release
+        uses: ncipollo/release-action@v1
+        with:
+          name: ${{ env.DATE }} for ${{ env.FIRMWARE_TAG }}
+          allowUpdates: true
+          tag: ${{ env.FIRMWARE_TAG }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifacts: ${{ env.TEMP_DIR }}/final/*
+          bodyFile: ${{ env.TEMP_DIR }}/release_notes.md
+
+  # 清理阶段：删除旧缓存
+  cleanup:
+    needs: [sync-cache, build-pro, build-max, build-ultra, publish]
+    runs-on: ubuntu-22.04
+    if: always()
+    steps:
+      - name: 删除旧缓存
+        run: |
+          echo "🗑️ 删除旧缓存..."
+          
+          # 获取缓存列表并删除
+          gh cache list --key openwrt-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}- --json key --jq '.[] | .key' | while read -r key; do
+            gh cache delete "$key"
+          done
+          
+          # 输出缓存状态
+          echo "========缓存状态========"
+          echo "ccache: $(du -sh ${{ env.CCACHE_DIR }} 2>/dev/null | cut -f 1 || echo 'N/A')"
+          echo "staging: $(du -sh ${{ env.OPENWRT_PATH }}/staging_dir 2>/dev/null | cut -f 1 || echo 'N/A')"
+          echo "✅ 缓存清理完成"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

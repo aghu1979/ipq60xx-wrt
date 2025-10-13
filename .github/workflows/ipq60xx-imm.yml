@@ -159,7 +159,7 @@ jobs:
           echo "🔧 开始合并配置文件..."
           
           # 合并配置文件
-          cat configs/${{ env.DEVICE_SUBTARGET }}_base.config > ${{ env.OPENWRT_PATH }}/.config
+          cat configs/${{ env.DEVICE_SUBTARGET }}.base.config > ${{ env.OPENWRT_PATH }}/.config
           cat configs/${{ env.BRANCH_ABBR }}.config >> ${{ env.OPENWRT_PATH }}/.config
           cat configs/${{ env.CONFIG_TYPE }}.config >> ${{ env.OPENWRT_PATH }}/.config
           

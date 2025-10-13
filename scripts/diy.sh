@@ -386,34 +386,3 @@ endef
 EOF
 
 echo "✅ DIY脚本执行完成"
-PKG_NAME:=custom-system
-PKG_VERSION:=1.0
-PKG_RELEASE:=1
-
-include \$(INCLUDE_DIR)/package.mk
-
-define Package/custom-system
-  SECTION:=utils
-  CATEGORY:=Utilities
-  TITLE:=Custom system settings
-  DEPENDS:=+luci
-endef
-
-define Package/custom-system/description
-  This package contains custom system settings and scripts.
-endef
-
-define Build/Compile
-endef
-
-define Package/custom-system/install
-    \$(INSTALL_DIR) \$(1)/etc
-    \$(INSTALL_DATA) ./files/etc/sysctl.conf \$(1)/etc/
-    \$(INSTALL_DIR) \$(1)/etc/init.d
-    \$(INSTALL_BIN) ./files/etc/init.d/99-custom-init \$(1)/etc/init.d/
-endef
-
-\$(eval \$(call BuildPackage,custom-system))
-EOF
-
-echo "✅ DIY脚本执行完成"

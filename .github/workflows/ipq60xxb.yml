@@ -1,4 +1,4 @@
-name: OpenWrt 高效分步并行式固件编译
+name: OpenWrt 高效分步式固件编译
 
 on:
   workflow_dispatch:
@@ -298,7 +298,7 @@ jobs:
         source_repo: [openwrt, immortalwrt, libwrt]
     outputs:
       cache-key-base: ${{ steps.cache-key-base.outputs.key }}
-      cache-key-toolchain: ${{ steps.cache-key-toolchain.outputs.key }}
+      cache-key-toolchain: ${{ steps.cache-key-base.outputs.toolchain-key }}
       devices: ${{ steps.get-devices.outputs.devices }}
       kernel-version: ${{ steps.get-kernel.outputs.version }}
       repo-url: ${{ steps.set-env.outputs.repo-url }}
@@ -409,7 +409,7 @@ jobs:
           path: |
             ${{ env.OPENWRT_PATH }}/staging_dir/host
             ${{ env.OPENWRT_PATH }}/staging_dir/toolchain-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
-          key: ${{ steps.cache-key-toolchain.outputs.key }}
+          key: ${{ steps.cache-key-base.outputs.toolchain-key }}
 
       - name: 创建目录结构
         run: |
@@ -511,7 +511,7 @@ jobs:
           path: |
             ${{ env.OPENWRT_PATH }}/staging_dir/host
             ${{ env.OPENWRT_PATH }}/staging_dir/toolchain-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
-          key: ${{ steps.cache-key-toolchain.outputs.key }}
+          key: ${{ steps.cache-key-base.outputs.toolchain-key }}
 
       - name: 运行DIY脚本
         run: |

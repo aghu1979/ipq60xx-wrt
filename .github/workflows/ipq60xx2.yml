@@ -1,4 +1,4 @@
-name: OpenWrt 高效分步式固件编译
+name: OpenWrt 高效分步式固件编译2
 
 on:
   workflow_dispatch:

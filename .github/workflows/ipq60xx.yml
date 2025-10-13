@@ -173,7 +173,7 @@ jobs:
           echo "🔧 开始合并基础配置文件..."
           
           # 合并基础配置文件（不包含Pro/Max/Ultra）
-          cat configs/${{ env.DEVICE_SUBTARGET }}_base.config > ${{ env.OPENWRT_PATH }}/.config
+          cat configs/${{ env.DEVICE_SUBTARGET }}.base.config > ${{ env.OPENWRT_PATH }}/.config
           cat configs/${{ env.BRANCH_ABBR }}.config >> ${{ env.OPENWRT_PATH }}/.config
           
           echo "✅ 基础配置文件合并完成"

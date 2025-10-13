@@ -55,23 +55,26 @@ jobs:
 
       - name: 创建目录结构
         run: |
+          # 创建必要的目录结构，用于存放源码、缓存和日志
           mkdir -p ${{ env.OPENWRT_PATH }}
           mkdir -p ${{ env.TEMP_DIR }}
           mkdir -p ${{ env.LOG_DIR }}
           mkdir -p ${{ env.PACKAGE_DIR }}
           mkdir -p ${{ env.CCACHE_DIR }}
 
-      - name: 下载主源码（使用openwrt作为基础）
+      - name: 下载主源码（使用immortalwrt作为基础）
         run: |
-          echo "🚀 下载主源码用于预编译..."
-          git clone ${{ env.REPO_URL_OPENWRT }} ${{ env.OPENWRT_PATH }}
+          echo "🚀 下载immortalwrt源码用于预编译..."
+          # 修改：使用immortalwrt仓库替代openwrt
+          git clone ${{ env.REPO_URL_IMMORTALWRT }} ${{ env.OPENWRT_PATH }}
           cd ${{ env.OPENWRT_PATH }}
           git checkout master
-          echo "✅ 源码下载完成"
+          echo "✅ immortalwrt源码下载完成"
 
       - name: 生成缓存键
         id: cache-keys
         run: |
+          # 生成唯一的缓存键，用于区分不同配置的缓存
           # luci软件包缓存键（基于Ultra配置）
           LUCI_CACHE_KEY="luci-packages-ultra-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ hashFiles('configs/*.config') }}"
           echo "luci-key=$LUCI_CACHE_KEY" >> $GITHUB_OUTPUT
@@ -123,28 +126,29 @@ jobs:
       - name: 配置Ultra编译环境
         if: steps.cache-luci.outputs.cache-hit != 'true'
         run: |
-          echo "⚙️ 配置Ultra编译环境（用于完整luci缓存）..."
+          echo "⚙️ 配置immortalwrt的Ultra编译环境（用于完整luci缓存）..."
           cd ${{ env.OPENWRT_PATH }}
           
           # 合并完整Ultra配置
-          cat configs/ipq60xx.base.config > .config
-          cat configs/openwrt.config >> .config
+          cat configs/base_ipq60xx.config > .config
+          cat configs/base_immwrt.config >> .config  # 修改：使用immortalwrt基础配置
           cat configs/Ultra.config >> .config
           
-          # 启用ccache
+          # 启用ccache加速编译
           echo "CONFIG_CCACHE=y" >> .config
           
           # 生成配置
           make defconfig
-          echo "✅ Ultra配置完成"
+          echo "✅ immortalwrt的Ultra配置完成"
 
       - name: 更新feeds（如果需要）
         if: steps.cache-luci.outputs.cache-hit != 'true'
         run: |
-          echo "🔄 更新feeds..."
+          echo "🔄 更新immortalwrt的feeds..."
           cd ${{ env.OPENWRT_PATH }}
+          # feeds是软件包源，需要更新以获取最新软件包列表
           ./scripts/feeds update -a
-          echo "✅ Feeds更新完成"
+          echo "✅ immortalwrt的Feeds更新完成"
 
       - name: 下载所有源码包（如果需要）
         if: steps.cache-download.outputs.cache-hit != 'true'
@@ -152,32 +156,33 @@ jobs:
           echo "📥 下载所有源码包..."
           cd ${{ env.OPENWRT_PATH }}
           
-          # 设置ccache
+          # 设置ccache缓存目录和大小限制
           export CCACHE_DIR=${{ env.CCACHE_DIR }}
           export CCACHE_MAXSIZE=4G
           
-          # 下载所有依赖
+          # 下载所有依赖包，避免编译过程中因缺少依赖而失败
           make download -j$(nproc)
           echo "✅ 源码包下载完成"
 
       - name: 预编译Ultra配置的luci软件包（如果需要）
         if: steps.cache-luci.outputs.cache-hit != 'true'
         run: |
-          echo "🔨 预编译Ultra配置的luci软件包（完整缓存）..."
+          echo "🔨 预编译immortalwrt的Ultra配置luci软件包（完整缓存）..."
           cd ${{ env.OPENWRT_PATH }}
           
-          # 设置ccache
+          # 设置ccache缓存目录和大小限制
           export CCACHE_DIR=${{ env.CCACHE_DIR }}
           export CCACHE_MAXSIZE=4G
           
           # 编译所有luci软件包（基于Ultra配置）
-          echo "开始编译Ultra配置的所有luci软件包..."
+          echo "开始编译immortalwrt的Ultra配置的所有luci软件包..."
           
           # 获取Ultra配置中的所有luci包
           LUCI_PACKAGES=$(grep "^CONFIG_PACKAGE_luci-" .config | sed 's/CONFIG_PACKAGE_\(.*\)=y/\1/')
           
+          # 逐个编译luci包，包括其依赖和汉化包
           for package in $LUCI_PACKAGES; do
-            echo "编译Ultra luci包: $package"
+            echo "编译immortalwrt的Ultra luci包: $package"
             make package/$package/compile -j$(nproc) || true
             echo "✅ $package 编译完成（包括依赖和汉化包）"
           done
@@ -186,13 +191,13 @@ jobs:
           for package in $(find feeds/luci/packages -name "Makefile" | grep -v "/src/" | sed 's|/Makefile||g'); do
             if [ -d "$package" ]; then
                 pkg_name=$(basename "$package")
-                echo "编译feeds luci包: $pkg_name"
+                echo "编译immortalwrt的feeds luci包: $pkg_name"
                 make package/$pkg_name/compile -j$(nproc) || true
                 echo "✅ $pkg_name 编译完成"
             fi
           done
           
-          echo "✅ Ultra配置luci软件包预编译完成"
+          echo "✅ immortalwrt的Ultra配置luci软件包预编译完成"
 
       - name: 保存luci软件包缓存
         if: steps.cache-luci.outputs.cache-hit != 'true'
@@ -242,33 +247,38 @@ jobs:
       - name: 设置环境变量
         id: set-env
         run: |
-          # 设置仓库URL和分支
+          # 根据不同的源码仓库设置相应的URL和分支
           case "${{ matrix.source_repo }}" in
             "openwrt") 
               REPO_URL="${{ env.REPO_URL_OPENWRT }}"
               BRANCH_NAME="master"
               BRANCH_ABBR="openwrt"
+              BASE_CONFIG="base_openwrt"
               ;;
             "immortalwrt") 
               REPO_URL="${{ env.REPO_URL_IMMORTALWRT }}"
               BRANCH_NAME="master"
               BRANCH_ABBR="immwrt"
+              BASE_CONFIG="base_immwrt"
               ;;
             "libwrt") 
               REPO_URL="${{ env.REPO_URL_LIBWRT }}"
               BRANCH_NAME="k6.12-nss"
               BRANCH_ABBR="libwrt"
+              BASE_CONFIG="base_libwrt"
               ;;
           esac
           
           echo "repo-url=$REPO_URL" >> $GITHUB_OUTPUT
           echo "branch-name=$BRANCH_NAME" >> $GITHUB_OUTPUT
           echo "branch-abbr=$BRANCH_ABBR" >> $GITHUB_OUTPUT
+          echo "base-config=$BASE_CONFIG" >> $GITHUB_OUTPUT
           
           # 设置全局环境变量
           echo "REPO_URL=$REPO_URL" >> $GITHUB_ENV
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
           echo "BRANCH_ABBR=$BRANCH_ABBR" >> $GITHUB_ENV
+          echo "BASE_CONFIG=$BASE_CONFIG" >> $GITHUB_ENV
           echo "SOURCE_REPO=${{ matrix.source_repo }}" >> $GITHUB_ENV
           echo "VERSION_KERNEL=$(date +%Y.%m)" >> $GITHUB_ENV
           echo "VERSION_INFO=最新更新于 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
@@ -276,6 +286,7 @@ jobs:
           echo "仓库URL: $REPO_URL"
           echo "分支名称: $BRANCH_NAME"
           echo "分支缩写: $BRANCH_ABBR"
+          echo "基础配置: $BASE_CONFIG"
 
       - name: 生成各阶段缓存键
         id: cache-key-base
@@ -313,6 +324,7 @@ jobs:
 
       - name: 创建目录结构
         run: |
+          # 创建必要的目录结构
           mkdir -p ${{ env.OPENWRT_PATH }}
           mkdir -p ${{ env.TEMP_DIR }}
           mkdir -p ${{ env.LOG_DIR }}
@@ -323,6 +335,7 @@ jobs:
         if: steps.restore-cache-base.outputs.cache-hit != 'true'
         run: |
           echo "🚀 开始下载源码..."
+          # 下载对应仓库的源码
           git clone ${{ env.REPO_URL }} ${{ env.OPENWRT_PATH }}
           cd ${{ env.OPENWRT_PATH }}
           git checkout ${{ env.BRANCH_NAME }}
@@ -351,8 +364,8 @@ jobs:
           cd ${{ env.OPENWRT_PATH }}
           
           # 合并基础配置文件（不包含Pro/Max/Ultra）
-          cat configs/ipq60xx.base.config > .config
-          cat configs/${{ env.BRANCH_ABBR }}.config >> .config
+          cat configs/base_ipq60xx.config > .config
+          cat configs/${{ env.BASE_CONFIG }}.config >> .config
           
           # 启用ccache
           echo "CONFIG_CCACHE=y" >> .config
@@ -366,6 +379,7 @@ jobs:
         run: |
           echo "📋 获取设备列表..."
           cd ${{ env.OPENWRT_PATH }}
+          # 从配置文件中提取设备列表
           DEVICES=$(grep -oE 'CONFIG_TARGET_DEVICE_.*_DEVICE_[^=]+=y' .config | sed -E 's/.*DEVICE_([^=]+)=y/\1/' | tr '\n' ' ')
           echo "devices=$DEVICES" >> $GITHUB_OUTPUT
           echo "检测到的设备: $DEVICES"
@@ -375,6 +389,7 @@ jobs:
         run: |
           echo "🔍 获取内核版本..."
           cd ${{ env.OPENWRT_PATH }}
+          # 从配置文件中提取内核版本
           VERSION=$(grep 'CONFIG_KERNEL_' .config | head -1 | cut -d'=' -f2 | tr -d '"')
           if [ -z "$VERSION" ]; then
             VERSION="6.12"
@@ -392,7 +407,7 @@ jobs:
           export CCACHE_DIR=${{ env.CCACHE_DIR }}
           export CCACHE_MAXSIZE=4G
           
-          # 编译工具链
+          # 编译工具链，工具链是编译固件的基础
           make toolchain/install -j$(nproc) 2>&1 | tee toolchain_build.log
           echo "✅ 工具链编译完成"
 
@@ -409,6 +424,7 @@ jobs:
         run: |
           echo "🛠️ 运行DIY脚本..."
           cd ${{ env.OPENWRT_PATH }}
+          # DIY脚本用于自定义修改源码
           chmod +x scripts/diy.sh
           ./scripts/diy.sh ${{ env.OPENWRT_PATH }}
           echo "✅ DIY脚本执行完成"
@@ -422,7 +438,7 @@ jobs:
           # 确保feeds目录存在
           mkdir -p feeds/packages feeds/luci feeds/routing feeds/telephony feeds/management
           
-          # 更新feeds
+          # 更新feeds，获取最新的软件包列表
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           echo "✅ Feeds 更新完成"
@@ -451,7 +467,7 @@ jobs:
 
       - name: 设置环境变量
         run: |
-          # 设置仓库URL和分支
+          # 根据不同的源码仓库设置相应的URL和分支
           case "${{ matrix.source_repo }}" in
             "openwrt") 
               REPO_URL="${{ env.REPO_URL_OPENWRT }}"
@@ -493,6 +509,7 @@ jobs:
 
       - name: 创建目录结构
         run: |
+          # 创建必要的目录结构
           mkdir -p ${{ env.LOG_DIR }}
           mkdir -p ${{ env.PACKAGE_DIR }}
 
@@ -519,6 +536,7 @@ jobs:
         run: |
           echo "📥 下载依赖..."
           cd ${{ env.OPENWRT_PATH }}
+          # 下载编译所需的依赖包
           make download -j$(nproc)
           echo "✅ 依赖下载完成"
 
@@ -559,7 +577,7 @@ jobs:
 
       - name: 设置环境变量
         run: |
-          # 设置仓库URL和分支
+          # 根据不同的源码仓库设置相应的URL和分支
           case "${{ matrix.source_repo }}" in
             "openwrt") 
               REPO_URL="${{ env.REPO_URL_OPENWRT }}"
@@ -588,6 +606,7 @@ jobs:
 
       - name: 检查基础系统编译状态
         run: |
+          # 检查基础系统是否编译成功
           if [ "${{ needs.build-base.outputs.build-status }}" != "success" ]; then
             echo "❌ 基础系统编译失败，跳过Pro配置编译"
             exit 1
@@ -614,6 +633,7 @@ jobs:
 
       - name: 创建目录结构
         run: |
+          # 创建必要的目录结构
           mkdir -p ${{ env.LOG_DIR }}
           mkdir -p ${{ env.PACKAGE_DIR }}
 
@@ -725,7 +745,7 @@ jobs:
 
       - name: 设置环境变量
         run: |
-          # 设置仓库URL和分支
+          # 根据不同的源码仓库设置相应的URL和分支
           case "${{ matrix.source_repo }}" in
             "openwrt") 
               REPO_URL="${{ env.REPO_URL_OPENWRT }}"
@@ -754,6 +774,7 @@ jobs:
 
       - name: 检查基础系统编译状态
         run: |
+          # 检查基础系统是否编译成功
           if [ "${{ needs.build-base.outputs.build-status }}" != "success" ]; then
             echo "❌ 基础系统编译失败，跳过Max配置编译"
             exit 1
@@ -780,6 +801,7 @@ jobs:
 
       - name: 创建目录结构
         run: |
+          # 创建必要的目录结构
           mkdir -p ${{ env.LOG_DIR }}
           mkdir -p ${{ env.PACKAGE_DIR }}
 
@@ -891,7 +913,7 @@ jobs:
 
       - name: 设置环境变量
         run: |
-          # 设置仓库URL和分支
+          # 根据不同的源码仓库设置相应的URL和分支
           case "${{ matrix.source_repo }}" in
             "openwrt") 
               REPO_URL="${{ env.REPO_URL_OPENWRT }}"
@@ -920,6 +942,7 @@ jobs:
 
       - name: 检查基础系统编译状态
         run: |
+          # 检查基础系统是否编译成功
           if [ "${{ needs.build-base.outputs.build-status }}" != "success" ]; then
             echo "❌ 基础系统编译失败，跳过Ultra配置编译"
             exit 1
@@ -946,6 +969,7 @@ jobs:
 
       - name: 创建目录结构
         run: |
+          # 创建必要的目录结构
           mkdir -p ${{ env.LOG_DIR }}
           mkdir -p ${{ env.PACKAGE_DIR }}
 
@@ -1058,6 +1082,7 @@ jobs:
 
       - name: 创建目录结构
         run: |
+          # 创建必要的目录结构
           mkdir -p ${{ env.TEMP_DIR }}
           mkdir -p ${{ env.LOG_DIR }}
           mkdir -p ${{ env.PACKAGE_DIR }}

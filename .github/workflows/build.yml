@@ -51,11 +51,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt
-          # 修复: 移除 github.sha 以便在相同配置下复用缓存
+          # Key 基于分支和架构，确保不同源码使用不同缓存
           key: ${{ runner.os }}-source-${{ inputs.branch_config }}-${{ inputs.target_arch }}
-          restore-keys: |
-            ${{ runner.os }}-source-${{ inputs.branch_config }}-
-            ${{ runner.os }}-source-
+          # 不设置 restore-keys，强制精确匹配
       
       - name: 📥 克隆源码
         if: steps.cache-source.outputs.cache-hit != 'true'
@@ -75,6 +73,14 @@ jobs:
           git clone $REPO_URL -b $REPO_BRANCH openwrt
           echo -e "${GREEN}✅ 源码克隆完成。${NC}"
 
+      - name: 📤 源码缓存状态
+        run: |
+          if [ "${{ steps.cache-source.outputs.cache-hit }}" == "true" ]; then
+            echo -e "${GREEN}✅ 源码缓存命中！Key: ${{ runner.os }}-source-${{ inputs.branch_config }}-${{ inputs.target_arch }}${NC}"
+          else
+            echo -e "${YELLOW}⚠️ 源码缓存未命中。Key: ${{ runner.os }}-source-${{ inputs.branch_config }}-${{ inputs.target_arch }}${NC}"
+          fi
+
       - name: 💾 缓存 Feeds 和下载包
         id: cache-feeds-dl
         uses: actions/cache@v4
@@ -82,12 +88,20 @@ jobs:
           path: |
             openwrt/dl
             openwrt/feeds
-          # 这个key是稳定的，只要源码缓存命中，它就能正常工作
+          # Key 基于分支配置，因为不同分支的 feeds 不同
           key: ${{ runner.os }}-feeds-dl-${{ inputs.branch_config }}
           restore-keys: |
             ${{ runner.os }}-feeds-dl-${{ inputs.branch_config }}-
             ${{ runner.os }}-feeds-dl-
         if: success()
+
+      - name: 📤 Feeds 缓存状态
+        run: |
+          if [ "${{ steps.cache-feeds-dl.outputs.cache-hit }}" == "true" ]; then
+            echo -e "${GREEN}✅ Feeds 缓存命中！Key: ${{ runner.os }}-feeds-dl-${{ inputs.branch_config }}${NC}"
+          else
+            echo -e "${YELLOW}⚠️ Feeds 缓存未命中。Key: ${{ runner.os }}-feeds-dl-${{ inputs.branch_config }}${NC}"
+          fi
 
       - name: 🛠️ 安装编译依赖
         run: |
@@ -170,13 +184,11 @@ jobs:
           changed_packages=0
           removed_packages=0
           
-          # 修复: 使用进程替换，避免子shell，使变量能正确累加
           while IFS= read -r line; do
             pkg_name=$(echo "$line" | cut -d'=' -f1)
             before_status=$(echo "$line" | cut -d'=' -f2)
             total_packages=$((total_packages + 1))
             
-            # 修复: 在grep后添加 || true，防止找不到包时脚本因 bash -e 而退出
             after_line=$(grep "^$pkg_name=" .config || true)
             if [ -n "$after_line" ]; then
               after_status=$(echo "$after_line" | cut -d'=' -f2)
@@ -211,40 +223,29 @@ jobs:
           echo -e "总软件包数: ${BOLD}$total_packages${NC}"
           echo -e "状态改变: ${RED}$changed_packages${NC}"
           echo -e "已移除: ${RED}$removed_packages${NC}"
-          # 修复: 更健壮地计算新增包数量
           echo -e "新增软件包: ${GREEN}$(echo "$new_packages" | grep -c . || echo 0)${NC}"
           
           # 显示完整的差异对比，高亮显示差异
           echo -e "\n${YELLOW}📋 完整的 Luci 软件包差异对比:${NC}"
-          # 创建一个临时脚本来处理diff输出并高亮差异
           cat > /tmp/highlight_diff.sh << 'EOF'
           #!/bin/bash
           while IFS= read -r line; do
             case "$line" in
-              "<"*)
-                echo -e "${RED}$line${NC}"
-                ;;
-              ">"*)
-                echo -e "${GREEN}$line${NC}"
-                ;;
-              "---"*)
-                echo -e "${CYAN}$line${NC}"
-                ;;
-              *)
-                echo "$line"
-                ;;
+              "<"*) echo -e "${RED}$line${NC}" ;;
+              ">") echo -e "${GREEN}$line${NC}" ;;
+              "---") echo -e "${CYAN}$line${NC}" ;;
+              *) echo "$line" ;;
             esac
           done
           EOF
           chmod +x /tmp/highlight_diff.sh
           
-          # 使用diff并高亮显示差异
           diff <(grep "CONFIG_PACKAGE_luci" .config.pre-defconfig | sort) <(grep "CONFIG_PACKAGE_luci" .config | sort) | /tmp/highlight_diff.sh || echo -e "${CYAN}无差异${NC}"
           
           echo -e "\n${GREEN}✅ Luci 软件包对比分析完成。${NC}"
           echo "::endgroup::"
 
-      # 新增：缓存 ccache 和编译产物以实现增量编译
+      # 优化：层级化缓存 ccache 和编译产物
       - name: 💾 缓存 ccache 和编译产物
         id: cache-build
         uses: actions/cache@v4
@@ -253,22 +254,26 @@ jobs:
             openwrt/.ccache
             openwrt/build_dir
             openwrt/staging_dir
-          # Key 基于配置文件内容，确保配置变化时缓存失效
+          # 精确 Key: 用于完美匹配
           key: ${{ runner.os }}-build-${{ inputs.branch_config }}-${{ inputs.target_arch }}-${{ hashFiles('openwrt/.config') }}
+          # 层级 Restore-Keys: 用于在配置变化时恢复基础缓存
           restore-keys: |
             ${{ runner.os }}-build-${{ inputs.branch_config }}-${{ inputs.target_arch }}-
             ${{ runner.os }}-build-${{ inputs.branch_config }}-
             ${{ runner.os }}-build-
 
+      - name: 📤 编译产物缓存状态
+        run: |
+          if [ "${{ steps.cache-build.outputs.cache-hit }}" == "true" ]; then
+            echo -e "${GREEN}✅ 编译产物缓存完美命中！将进行极快的增量编译。${NC}"
+          else
+            echo -e "${YELLOW}⚠️ 编译产物缓存未完美命中，但可能已恢复基础缓存进行增量编译。${NC}"
+          fi
+
       - name: 🏗️ 编译固件
         run: |
           cd openwrt
           echo -e "${YELLOW}🚀 开始编译固件... (这可能需要很长时间)${NC}"
-          if [ "${{ steps.cache-build.outputs.cache-hit }}" == "true" ]; then
-            echo -e "${GREEN}✅ 编译产物缓存命中，将进行增量编译。${NC}"
-          else
-            echo -e "${YELLOW}⚠️ 编译产物缓存未命中，将进行完整编译。${NC}"
-          fi
           make -j$(nproc) || (echo -e "${RED}❌ 并行编译失败，正在尝试单线程详细编译...${NC}" && make -j1 V=s)
           echo -e "${GREEN}✅ 固件编译完成。${NC}"
 

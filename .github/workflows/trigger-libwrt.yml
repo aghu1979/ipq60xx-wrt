@@ -1,3 +1,4 @@
+# .github/workflows/trigger-libwrt.yml
 name: 为 LibWrt 分支触发构建
 
 # 定义触发条件
@@ -12,6 +13,16 @@ on:
   # 允许在 GitHub 页面上手动触发
   workflow_dispatch:
     inputs:
+      # 允许用户选择操作系统版本
+      ubuntu_version:
+        description: '选择运行环境操作系统版本'
+        required: true
+        default: 'ubuntu-22.04'
+        type: choice
+        options:
+        - ubuntu-22.04
+        - ubuntu-24.04
+        - ubuntu-latest
       target_arch:
         description: '选择芯片架构'
         required: true
@@ -35,7 +46,8 @@ jobs:
     # 核心操作：调用我们定义好的可复用工作流 build.yml
     uses: ./.github/workflows/build.yml
     with:
-      # 传递参数给 build.yml
+      # 传递所有参数给 build.yml，包括新增的 ubuntu_version
+      ubuntu_version: ${{ inputs.ubuntu_version }}
       branch_config: 'libwrt_base'
       target_arch: ${{ inputs.target_arch || 'ipq60xx' }}
       package_config: ${{ inputs.package_profile || 'Pro' }}

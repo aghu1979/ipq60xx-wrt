@@ -104,7 +104,7 @@ jobs:
           cd openwrt
           echo -e "${YELLOW}🔧 正在合并配置: 分支-${{ inputs.branch_config }}, 软件-${{ inputs.package_config }}, 架构-${{ inputs.target_arch }}${NC}"
           # 【关键修改】根据最新的文件命名规则修改路径
-          cat ../configs/base_${{ inputs.target_arch }}_.config \
+          cat ../configs/base_${{ inputs.target_arch }}.config \
               ../configs/${{ inputs.branch_config }}.config \
               ../configs/${{ inputs.package_config }}.config > .config
           echo -e "${GREEN}✅ 配置文件合并完成。${NC}"

@@ -1,388 +1,155 @@
 #!/bin/bash
+# scripts/diy.sh
 
-# DIY脚本：配置第三方源及设备初始管理IP/密码
-# 参数: $1 = OpenWrt源码路径
+# 启用严格模式：遇到错误立即退出，未定义的变量视为错误
+set -euo pipefail
 
-OPENWRT_PATH="$1"
+# --- 主逻辑 ---
+main() {
+    # 接收从 workflow 传入的参数
+    local branch_name="${1:-openwrt}"
+    local soc_name="${2:-ipq60xx}"
 
-if [ -z "$OPENWRT_PATH" ]; then
-  echo "❌ 错误: 未提供OpenWrt源码路径"
-  exit 1
-fi
+    echo "=========================================="
+    echo " DIY Script for OpenWrt"
+    echo " Branch: ${branch_name}"
+    echo " SoC:     ${soc_name}"
+    echo "=========================================="
 
-echo "🛠️ 开始执行DIY脚本..."
+    # 步骤 1: 修改默认IP & 固件名称 & 编译署名
+    echo "==> Step 1: Modifying default settings..."
+    sed -i 's/192.168.1.1/192.168.111.1/g' package/base-files/files/bin/config_generate
+    sed -i "s/hostname='.*'/hostname='WRT'/g" package/base-files/files/bin/config_generate
+    sed -i "s/(\(luciversion || ''\))/(\1) + (' \/ Built by Mary')/g" feeds/luci/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/10_system.js
+    echo "✅ Default settings modified."
 
-# 进入源码目录
-cd "$OPENWRT_PATH" || exit 1
+    # 步骤 2: 预删除官方软件源缓存
+    echo "==> Step 2: Pre-deleting official package caches..."
+    OFFICIAL_CACHE_PACKAGES=(
+"package/feeds/packages/golang"
+        # laipeng668定制包相关的官方缓存包
+        "package/feeds/packages/golang"
+        "package/feeds/packages/ariang"
+        "package/feeds/packages/frp"
+        "package/feeds/packages/adguardhome"
+        "package/feeds/packages/wolplus"
+        "package/feeds/packages/lucky"
+        "package/feeds/packages/wechatpush"
+        "package/feeds/packages/open-app-filter"
+        "package/feeds/packages/gecoosac"
+        "package/feeds/luci/luci-app-frpc"
+        "package/feeds/luci/luci-app-frps"
+        "package/feeds/luci/luci-app-adguardhome"
+        "package/feeds/luci/luci-app-wolplus"
+        "package/feeds/luci/luci-app-lucky"
+        "package/feeds/luci/luci-app-wechatpush"
+        "package/feeds/luci/luci-app-athena-led"
 
-# 1. 修改默认IP、主机名、编译署名和WiFi设置
-echo "🌐 修改默认IP、主机名、编译署名和WiFi设置"
-sed -i 's/192.168.1.1/192.168.111.1/g' package/base-files/files/bin/config_generate
-sed -i "s/hostname='.*'/hostname='OpenWrt'/g" package/base-files/files/bin/config_generate
-sed -i "s/(\(luciversion || ''\))/(\1) + (' \/ Built by Mary')/g" feeds/luci/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/10_system.js
+        # Mary定制包相关的官方缓存包
+        "package/feeds/packages/netspeedtest"
+        "package/feeds/packages/partexp"
+        "package/feeds/packages/taskplan"
+        "package/feeds/packages/tailscale"
+        "package/feeds/packages/momo"
+        "package/feeds/packages/nikki"
+        "package/feeds/luci/luci-app-netspeedtest"
+        "package/feeds/luci/luci-app-partexp"
+        "package/feeds/luci/luci-app-taskplan"
+        "package/feeds/luci/luci-app-tailscale"
+        "package/feeds/luci/luci-app-momo"
+        "package/feeds/luci/luci-app-nikki"
+        "package/feeds/luci/luci-app-openclash"
+    )
 
-# 2. 调整NSS驱动q6_region内存区域预留大小（可选，默认注释）
-echo "🔧 NSS驱动内存预留配置（已注释，如需启用请取消注释）"
-# sed -i 's/reg = <0x0 0x4ab00000 0x0 0x[0-9a-f]\+>/reg = <0x0 0x4ab00000 0x0 0x01000000>/' target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq6018-512m.dtsi
-# sed -i 's/reg = <0x0 0x4ab00000 0x0 0x[0-9a-f]\+>/reg = <0x0 0x4ab00000 0x0 0x02000000>/' target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq6018-512m.dtsi
-# sed -i 's/reg = <0x0 0x4ab00000 0x0 0x[0-9a-f]\+>/reg = <0x0 0x4ab00000 0x0 0x04000000>/' target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq6018-512m.dtsi
-# sed -i 's/reg = <0x0 0x4ab00000 0x0 0x[0-9a-f]\+>/reg = <0x0 0x4ab00000 0x0 0x06000000>/' target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq6018-512m.dtsi
-
-# 3. 预删除官方软件源缓存（package/feeds/）
-echo "🗑️ 预删除官方软件源缓存"
-OFFICIAL_CACHE_PACKAGES=(
-    # laipeng668定制包相关的官方缓存包
-    "package/feeds/packages/golang"
-    "package/feeds/packages/ariang"
-    "package/feeds/packages/frp"
-    "package/feeds/packages/adguardhome"
-    "package/feeds/packages/wolplus"
-    "package/feeds/packages/lucky"
-    "package/feeds/packages/wechatpush"
-    "package/feeds/packages/open-app-filter"
-    "package/feeds/packages/gecoosac"
-    "package/feeds/luci/luci-app-frpc"
-    "package/feeds/luci/luci-app-frps"
-    "package/feeds/luci/luci-app-adguardhome"
-    "package/feeds/luci/luci-app-wolplus"
-    "package/feeds/luci/luci-app-lucky"
-    "package/feeds/luci/luci-app-wechatpush"
-    "package/feeds/luci/luci-app-athena-led"
-    
-    # Mary定制包相关的官方缓存包
-    "package/feeds/packages/netspeedtest"
-    "package/feeds/packages/partexp"
-    "package/feeds/packages/taskplan"
-    "package/feeds/packages/tailscale"
-    "package/feeds/packages/momo"
-    "package/feeds/packages/nikki"
-    "package/feeds/luci/luci-app-netspeedtest"
-    "package/feeds/luci/luci-app-partexp"
-    "package/feeds/luci/luci-app-taskplan"
-    "package/feeds/luci/luci-app-tailscale"
-    "package/feeds/luci/luci-app-momo"
-    "package/feeds/luci/luci-app-nikki"
-    "package/feeds/luci/luci-app-openclash"
-)
-
-for package in "${OFFICIAL_CACHE_PACKAGES[@]}"; do
-    if [ -d "$package" ]; then
-        rm -rf "$package"
-        echo "已删除缓存包: $package"
-    else
-        echo "缓存包不存在，跳过: $package"
-    fi
-done
-
-# 4. 预删除feeds工作目录（feeds/）
-echo "🗑️ 预删除feeds工作目录"
-FEEDS_WORK_PACKAGES=(
-    # laipeng668定制包相关的feeds工作目录
-    "feeds/packages/lang/golang"
-    "feeds/packages/net/ariang"
-    "feeds/packages/net/frp"
-    "feeds/packages/net/adguardhome"
-    "feeds/packages/net/wolplus"
-    "feeds/packages/net/lucky"
-    "feeds/packages/net/wechatpush"
-    "feeds/packages/net/open-app-filter"
-    "feeds/packages/net/gecoosac"
-    "feeds/luci/applications/luci-app-frpc"
-    "feeds/luci/applications/luci-app-frps"
-    "feeds/luci/applications/luci-app-adguardhome"
-    "feeds/luci/applications/luci-app-wolplus"
-    "feeds/luci/applications/luci-app-lucky"
-    "feeds/luci/applications/luci-app-wechatpush"
-    "feeds/luci/applications/luci-app-athena-led"
-    
-    # Mary定制包相关的feeds工作目录
-    "feeds/packages/net/netspeedtest"
-    "feeds/packages/utils/partexp"
-    "feeds/packages/utils/taskplan"
-    "feeds/packages/net/tailscale"
-    "feeds/packages/net/momo"
-    "feeds/packages/net/nikki"
-    "feeds/luci/applications/luci-app-netspeedtest"
-    "feeds/luci/applications/luci-app-partexp"
-    "feeds/luci/applications/luci-app-taskplan"
-    "feeds/luci/applications/luci-app-tailscale"
-    "feeds/luci/applications/luci-app-momo"
-    "feeds/luci/applications/luci-app-nikki"
-    "feeds/luci/applications/luci-app-openclash"
-)
-
-for package in "${FEEDS_WORK_PACKAGES[@]}"; do
-    if [ -d "$package" ]; then
-        rm -rf "$package"
-        echo "已删除工作目录包: $package"
-    else
-        echo "工作目录包不存在，跳过: $package"
-    fi
-done
-
-# 5. Git稀疏克隆函数
-echo "📥 定义Git稀疏克隆函数"
-git_sparse_clone() {
-    branch="$1" 
-    repourl="$2" 
-    shift 2
-    
-    echo "克隆仓库: $repourl (分支: $branch, 目录: $@)"
-    git clone --depth=1 -b $branch --single-branch --filter=blob:none --sparse $repourl
-    repodir=$(echo $repourl | awk -F '/' '{print $(NF)}')
-    cd $repodir && git sparse-checkout set $@
-    mv -f $@ ../package/
-    cd .. && rm -rf $repodir
-    echo "完成克隆: $repourl"
-}
-
-# 6. 定义包安装函数
-echo "📦 定义包安装函数"
-install_package() {
-    local name="$1"
-    local url="$2"
-    local target="$3"
-    local branch="${4:-master}"
-    
-    echo "安装包: $name"
-    if [ -d "package/$target" ]; then
-        echo "包已存在，跳过: $target"
-        return
-    fi
-    
-    if [[ "$url" == *"@"* ]]; then
-        # 稀疏克隆
-        local repo_url="${url%@*}"
-        local sparse_path="${url#*@}"
-        git_sparse_clone "$branch" "$repo_url" "$sparse_path"
-    else
-        # 完整克隆
-        git clone --depth=1 -b "$branch" "$url" "package/$target"
-    fi
-    echo "完成安装: $name"
-}
-
-# 7. laipeng668定制包列表
-echo "🎁 laipeng668定制包列表"
-declare -A LAIPENG_PACKAGES=(
-    ["golang"]="https://github.com/sbwml/packages_lang_golang|feeds/packages/lang/golang"
-    ["openlist"]="https://github.com/sbwml/luci-app-openlist2|package/openlist"
-    ["ariang"]="https://github.com/laipeng668/packages@net/ariang|package/ariang"
-    ["frp"]="https://github.com/laipeng668/packages@net/frp|package/frp"
-    ["frpc"]="https://github.com/laipeng668/luci@applications/luci-app-frpc|package/luci-app-frpc"
-    ["frps"]="https://github.com/laipeng668/luci@applications/luci-app-frps|package/luci-app-frps"
-    ["adguardhome"]="https://github.com/kenzok8/openwrt-packages@adguardhome|package/adguardhome"
-    ["luci-app-adguardhome"]="https://github.com/kenzok8/openwrt-packages@luci-app-adguardhome|package/luci-app-adguardhome"
-    ["wolplus"]="https://github.com/VIKINGYFY/packages@luci-app-wolplus|package/wolplus"
-    ["lucky"]="https://github.com/gdy666/luci-app-lucky|package/lucky"
-    ["wechatpush"]="https://github.com/tty228/luci-app-wechatpush|package/wechatpush"
-    ["openappfilter"]="https://github.com/destan19/OpenAppFilter.git|package/openappfilter"
-    ["gecoosac"]="https://github.com/lwb1978/openwrt-gecoosac|package/gecoosac"
-    ["athena-led"]="https://github.com/NONGFAH/luci-app-athena-led|package/athena-led"
-)
-
-# 8. Mary定制包列表
-echo "🎁 Mary定制包列表"
-declare -A MARY_PACKAGES=(
-    ["netspeedtest"]="https://github.com/sirpdboy/luci-app-netspeedtest|package/netspeedtest"
-    ["partexp"]="https://github.com/sirpdboy/luci-app-partexp|package/partexp"
-    ["taskplan"]="https://github.com/sirpdboy/luci-app-taskplan|package/taskplan"
-    ["tailscale"]="https://github.com/tailscale/tailscale|package/tailscale"
-    ["momo"]="https://github.com/nikkinikki-org/OpenWrt-momo|package/momo"
-    ["nikki"]="https://github.com/nikkinikki-org/OpenWrt-nikki|package/nikki"
-    ["openclash"]="https://github.com/vernesong/OpenClash|package/openclash"
-)
-
-# 9. 安装laipeng668定制包
-echo "📦 安装laipeng668定制包"
-for package_name in "${!LAIPENG_PACKAGES[@]}"; do
-    package_info="${LAIPENG_PACKAGES[$package_name]}"
-    url="${package_info%|*}"
-    target="${package_info#*|}"
-    
-    # 特殊处理需要移动到feeds的包
-    case "$package_name" in
-        "golang")
-            install_package "$package_name" "$url" "$target"
-            ;;
-        "frp")
-            install_package "$package_name" "$url" "$target"
-            if [ -d "package/frp" ]; then
-                mv -f package/frp feeds/packages/net/frp
-            fi
-            ;;
-        "frpc"|"frps")
-            install_package "$package_name" "$url" "$target"
-            if [ -d "package/luci-app-frpc" ]; then
-                mv -f package/luci-app-frpc feeds/luci/applications/luci-app-frpc
-            fi
-            if [ -d "package/luci-app-frps" ]; then
-                mv -f package/luci-app-frps feeds/luci/applications/luci-app-frps
-            fi
-            ;;
-        *)
-            install_package "$package_name" "$url" "$target"
-            ;;
-    esac
-done
-
-# 10. 安装Mary定制包
-echo "📦 安装Mary定制包"
-for package_name in "${!MARY_PACKAGES[@]}"; do
-    package_info="${MARY_PACKAGES[$package_name]}"
-    url="${package_info%|*}"
-    target="${package_info#*|}"
-    install_package "$package_name" "$url" "$target"
-done
-
-# 11. 设置特殊权限
-echo "🔐 设置特殊权限"
-if [ -d "package/athena-led" ]; then
-    chmod +x package/athena-led/root/etc/init.d/athena_led
-    chmod +x package/athena-led/root/usr/sbin/athena-led
-fi
-
-# 12. 添加kenzok8软件源（优先级最低）
-echo "🔗 添加kenzok8软件源（优先级最低）"
-git clone --depth=1 https://github.com/kenzok8/small-package package/small-package
-
-# 13. 更新和安装Feeds
-echo "🔄 更新和安装Feeds"
-./scripts/feeds update -a
-./scripts/feeds install -a
-
-# 14. 添加自定义系统配置
-echo "⚙️ 添加自定义系统配置"
-mkdir -p package/custom-system/files/etc
-cat > package/custom-system/files/etc/sysctl.conf << EOF
-# 自定义系统配置
-net.core.rmem_max = 16777216
-net.core.wmem_max = 16777216
-net.ipv4.tcp_rmem = 4096 87380 16777216
-net.ipv4.tcp_wmem = 4096 65536 16777216
-EOF
-
-# 15. 添加自定义初始化脚本
-echo "🚀 添加自定义初始化脚本"
-mkdir -p package/custom-system/files/etc/init.d
-cat > package/custom-system/files/etc/init.d/99-custom-init << EOF
-#!/bin/sh /etc/rc.common
-
-START=99
-
-start() {
-    # 自定义初始化脚本
-    echo "执行自定义初始化脚本..."
-    
-    # 设置时区
-    uci set system.@system[0].timezone='CST-8'
-    uci set system.@system[0].zonename='Asia/Shanghai'
-    uci commit system
-    
-    # 设置NTP服务器
-    uci delete system.ntp.server
-    uci add_list system.ntp.server='0.openwrt.pool.ntp.org'
-    uci add_list system.ntp.server='1.openwrt.pool.ntp.org'
-    uci add_list system.ntp.server='2.openwrt.pool.ntp.org'
-    uci add_list system.ntp.server='3.openwrt.pool.ntp.org'
-    uci commit system
-    
-    # 设置WiFi配置（支持多频段）
-    # 检测并配置所有WiFi设备
-    wifi_count=0
-    for wifi_device in \$(uci show wireless | grep "wifi-device" | cut -d. -f2 | cut -d= -f1); do
-        echo "检测到WiFi设备: \$wifi_device"
-        
-        # 获取对应的wifi-iface
-        wifi_iface=\$(uci show wireless | grep "wifi-iface" | grep "device='\$wifi_device'" | head -1 | cut -d. -f2 | cut -d= -f1)
-        if [ -n "\$wifi_iface" ]; then
-            echo "配置WiFi接口: \$wifi_iface"
-            
-            # 根据频段设置不同的SSID
-            hwmode=\$(uci get wireless.\$wifi_device.hwmode 2>/dev/null || echo "unknown")
-            case "\$hwmode" in
-                "11g"|"11b")
-                    ssid="OpenWrt-2.4G"
-                    ;;
-                "11a")
-                    # 检测是否为5.8GHz
-                    channel=\$(uci get wireless.\$wifi_device.channel 2>/dev/null || echo "0")
-                    if [ "\$channel" -gt 149 ] 2>/dev/null; then
-                        ssid="OpenWrt-5.8G"
-                    else
-                        ssid="OpenWrt-5.2G"
-                    fi
-                    ;;
-                *)
-                    ssid="OpenWrt"
-                    ;;
-            esac
-            
-            # 设置SSID和空密码
-            uci set wireless.\$wifi_iface.ssid="\$ssid"
-            uci set wireless.\$wifi_iface.key=""
-            uci set wireless.\$wifi_iface.encryption="none"
-            uci commit wireless
-            
-            wifi_count=\$((wifi_count + 1))
+    for package in "${OFFICIAL_CACHE_PACKAGES[@]}"; do
+        if [ -d "$package" ]; then
+            rm -rf "$package"
+            echo "已删除缓存包: $package"
         fi
     done
+
+    # 步骤 3: 预删除feeds工作目录
+    echo "==> Step 3: Pre-deleting feeds working directories..."
+    FEEDS_WORK_PACKAGES=(
+        # laipeng668定制包相关的feeds工作目录
+        "feeds/packages/lang/golang"
+        "feeds/packages/net/ariang"
+        "feeds/packages/net/frp"
+        "feeds/packages/net/adguardhome"
+        "feeds/packages/net/wolplus"
+        "feeds/packages/net/lucky"
+        "feeds/packages/net/wechatpush"
+        "feeds/packages/net/open-app-filter"
+        "feeds/packages/net/gecoosac"
+        "feeds/luci/applications/luci-app-frpc"
+        "feeds/luci/applications/luci-app-frps"
+        "feeds/luci/applications/luci-app-adguardhome"
+        "feeds/luci/applications/luci-app-wolplus"
+        "feeds/luci/applications/luci-app-lucky"
+        "feeds/luci/applications/luci-app-wechatpush"
+        "feeds/luci/applications/luci-app-athena-led"
+
+        # Mary定制包相关的feeds工作目录
+        "feeds/packages/net/netspeedtest"
+        "feeds/packages/utils/partexp"
+        "feeds/packages/utils/taskplan"
+        "feeds/packages/net/tailscale"
+        "feeds/packages/net/momo"
+        "feeds/packages/net/nikki"
+        "feeds/luci/applications/luci-app-netspeedtest"
+        "feeds/luci/applications/luci-app-partexp"
+        "feeds/luci/applications/luci-app-taskplan"
+        "feeds/luci/applications/luci-app-tailscale"
+        "feeds/luci/applications/luci-app-momo"
+        "feeds/luci/applications/luci-app-nikki"
+        "feeds/luci/applications/luci-app-openclash"
+    )
+
+    for package in "${FEEDS_WORK_PACKAGES[@]}"; do
+        if [ -d "$package" ]; then
+            rm -rf "$package"
+            echo "已删除工作目录包: $package"
+        fi
+    done
+
+    # 步骤 4: 克隆定制化软件包
+    echo "==> Step 4: Cloning custom packages..."
+    # laipeng668定制包
+    git clone --depth=1 https://github.com/sbwml/packages_lang_golang feeds/packages/lang/golang
+    git clone --depth=1 https://github.com/sbwml/luci-app-openlist2 package/openlist
+    git clone --depth=1 https://github.com/laipeng668/packages.git feeds/packages/net/ariang
+    git clone --depth=1 https://github.com/laipeng668/packages.git feeds/packages/net/frp
+    git clone --depth=1 https://github.com/laipeng668/luci.git feeds/luci/applications/luci-app-frpc
+    git clone --depth=1 https://github.com/laipeng668/luci.git feeds/luci/applications/luci-app-frps
+    git clone --depth=1 https://github.com/kenzok8/openwrt-packages.git package/adguardhome
+    git clone --depth=1 https://github.com/kenzok8/openwrt-packages.git package/luci-app-adguardhome
+    git clone --depth=1 https://github.com/VIKINGYFY/packages.git feeds/luci/applications/luci-app-wolplus
+    git clone --depth=1 https://github.com/tty228/luci-app-wechatpush.git package/luci-app-wechatpush
+    git clone --depth=1 https://github.com/destan19/OpenAppFilter.git package/OpenAppFilter
+    git clone --depth=1 https://github.com/lwb1978/openwrt-gecoosac.git package/openwrt-gecoosac
+    git clone --depth=1 https://github.com/NONGFAH/luci-app-athena-led.git package/luci-app-athena-led
     
-    # 启用WiFi
-    uci set wireless.@wifi-device[0].disabled=0 2>/dev/null
-    uci set wireless.@wifi-device[1].disabled=0 2>/dev/null
-    uci commit wireless
+    # Mary定制包
+    git clone --depth=1 https://github.com/sirpdboy/luci-app-netspeedtest.git package/netspeedtest
+    git clone --depth=1 https://github.com/sirpdboy/luci-app-partexp.git package/partexp
+    git clone --depth=1 https://github.com/sirpdboy/luci-app-taskplan.git package/taskplan
+    git clone --depth=1 https://github.com/tailscale/tailscale.git package/tailscale
+    git clone --depth=1 https://github.com/nikkinikki-org/OpenWrt-momo.git package/momo
+    git clone --depth=1 https://github.com/nikkinikki-org/OpenWrt-nikki.git package/nikki
+    git clone --depth=1 https://github.com/vernesong/OpenClash.git package/openclash
+
+    # kenzok8软件源
+    git clone --depth=1 https://github.com/kenzok8/small-package smpackage 
+
+
+    # 设置权限
+    chmod +x package/luci-app-athena-led/root/etc/init.d/athena_led package/luci-app-athena-led/root/usr/sbin/athena-led
     
-    # 重启网络服务
-    /etc/init.d/network restart
-    /etc/init.d/system restart
-    
-    echo "自定义初始化脚本执行完成，已配置 \$wifi_count 个WiFi设备"
+    echo "✅ Custom packages cloned."
+
+    # 注意：feeds update 和 install 已移至 build.yml 中，以便利用缓存
+    echo "==> DIY script finished successfully."
 }
-EOF
 
-chmod +x package/custom-system/files/etc/init.d/99-custom-init
-
-# 16. 添加自定义软件包Makefile
-echo "📦 创建自定义软件包Makefile"
-cat > package/custom-system/Makefile << EOF
-#
-# Copyright (C) 2023 OpenWrt.org
-#
-# This is free software, licensed under the GNU General Public License v2.
-# See /LICENSE for more information.
-#
-
-include \$(TOPDIR)/rules.mk
-
-PKG_NAME:=custom-system
-PKG_VERSION:=1.0
-PKG_RELEASE:=1
-
-include \$(INCLUDE_DIR)/package.mk
-
-define Package/custom-system
-  SECTION:=utils
-  CATEGORY:=Utilities
-  TITLE:=Custom system settings
-  DEPENDS:=+luci
-endef
-
-define Package/custom-system/description
-  This package contains custom system settings and scripts.
-endef
-
-define Build/Compile
-endef
-
-define Package/custom-system/install
-    \$(INSTALL_DIR) \$(1)/etc
-    \$(INSTALL_DATA) ./files/etc/sysctl.conf \$(1)/etc/
-    \$(INSTALL_DIR) \$(1)/etc/init.d
-    \$(INSTALL_BIN) ./files/etc/init.d/99-custom-init \$(1)/etc/init.d/
-endef
-
-\$(eval \$(call BuildPackage,custom-system))
-EOF
-
-echo "✅ DIY脚本执行完成"
+# 执行主函数，并传入所有参数
+main "$@"

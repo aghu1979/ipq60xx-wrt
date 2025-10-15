@@ -1,41 +1,47 @@
-name: Create Official Release
+name: 创建官方发布版
 
+# 定义触发条件：当创建一个以 'v' 开头的标签时
 on:
   push:
     tags:
       - 'v*'
 
 jobs:
+  # 第一个 job：构建所有版本的固件
   build-matrix:
     strategy:
       fail-fast: false
       matrix:
-        # 使用实际的分支配置文件名
         branch_config: [openwrt_base, immwrt_base, libwrt_base]
         package_config: [Pro, Max, Ultra]
+        target_arch: [ipq60xx, ipq80xx]
     uses: ./.github/workflows/build.yml
     with:
       branch_config: ${{ matrix.branch_config }}
       package_config: ${{ matrix.package_config }}
-      target_arch: 'ipq60xx'
+      target_arch: ${{ matrix.target_arch }}
 
+  # 第二个 job：创建 Release
   create-release:
+    # 依赖 build-matrix job，必须等所有构建完成后才能执行
     needs: build-matrix
     runs-on: ubuntu-latest
+    # 需要授权才能创建 Release
     permissions:
       contents: write
 
     steps:
-      - name: Checkout
+      - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: Download All Artifacts
+      # 下载所有构建任务上传的产物
+      - name: 下载所有产物
         uses: actions/download-artifact@v4
         with:
           path: all-artifacts
 
-      - name: Generate Release Body
-        id: generate_body
+      # 生成 Release 的正文内容
+      - name: 生成 Release 正文
         run: |
           touch release_body.md
           echo "## 🚀 OpenWrt Firmware Release ${{ github.ref_name }}" >> release_body.md
@@ -79,13 +85,14 @@ jobs:
           cat release_body.md >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Create Release and Upload Assets
+      # 创建 Release 并上传所有文件
+      - name: 创建 Release 并上传资源
         uses: softprops/action-gh-release@v1
         with:
           name: Release ${{ github.ref_name }}
           body: ${{ steps.generate_body.outputs.body }}
           files: |
-            all-artifacts/openwrt-ipq60xx-*/**/*.bin
+            all-artifacts/openwrt-*/**/*.bin
             all-artifacts/error-logs-*/**/*
           draft: false
           prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}

@@ -1,3 +1,4 @@
+# .github/workflows/weekly-build.yml
 name: 每周自动构建
 
 # 定义触发条件
@@ -22,6 +23,8 @@ jobs:
     # 调用可复用工作流，并将矩阵中的值作为参数传入
     uses: ./.github/workflows/build.yml
     with:
+      # 为自动化任务固定使用最稳定的 ubuntu-22.04，如需要其它环境在此修改。
+      ubuntu_version: 'ubuntu-22.04'
       branch_config: ${{ matrix.branch_config }}
       package_config: ${{ matrix.package_config }}
       target_arch: ${{ matrix.target_arch }}

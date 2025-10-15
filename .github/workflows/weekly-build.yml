@@ -1,0 +1,21 @@
+name: Weekly Automatic Build
+
+on:
+  schedule:
+    - cron: '0 16 * * 4'
+  workflow_dispatch:
+
+jobs:
+  build-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        # 使用实际的分支配置文件名
+        branch_config: [openwrt_base, immwrt_base, libwrt_base]
+        package_config: [Pro, Max, Ultra]
+
+    uses: ./.github/workflows/build.yml
+    with:
+      branch_config: ${{ matrix.branch_config }}
+      package_config: ${{ matrix.package_config }}
+      target_arch: 'ipq60xx'

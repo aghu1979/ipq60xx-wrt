@@ -1,3 +1,4 @@
+# .github/workflows/weekly-build.yml
 name: 每周自动构建
 
 # 定义触发条件

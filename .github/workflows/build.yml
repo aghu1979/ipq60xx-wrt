@@ -103,16 +103,10 @@ jobs:
         run: |
           cd openwrt
           echo -e "${YELLOW}🔧 正在合并配置: 分支-${{ inputs.branch_config }}, 软件-${{ inputs.package_config }}, 架构-${{ inputs.target_arch }}${NC}"
-          # 【关键修改】根据最新的文件命名规则修改路径
           cat ../configs/base_${{ inputs.target_arch }}.config \
               ../configs/${{ inputs.branch_config }}.config \
               ../configs/${{ inputs.package_config }}.config > .config
           echo -e "${GREEN}✅ 配置文件合并完成。${NC}"
-          
-          # 将合并后的内容输出到日志，方便调试
-          echo "::group::📄 查看最终合并的 .config 文件内容"
-          cat .config
-          echo "::endgroup::"
 
       - name: 🧪 运行自定义DIY脚本
         run: |
@@ -121,6 +115,20 @@ jobs:
           chmod +x $GITHUB_WORKSPACE/scripts/diy.sh
           $GITHUB_WORKSPACE/scripts/diy.sh ${{ inputs.branch_config }} ${{ inputs.target_arch }}
           echo -e "${GREEN}✅ DIY脚本执行完成。${NC}"
+
+      # 【关键新增】格式化配置文件，解决编译错误
+      - name: 🧹 格式化配置文件
+        run: |
+          cd openwrt
+          echo -e "${YELLOW}🧹 正在格式化 .config 文件以解决潜在的格式问题...${NC}"
+          # make defconfig 会读取当前 .config 并生成一个格式正确的 .config
+          make defconfig
+          echo -e "${GREEN}✅ .config 文件格式化完成。${NC}"
+          
+          # 将格式化后的内容输出到日志，方便调试
+          echo "::group::📄 查看格式化后的最终 .config 文件内容"
+          cat .config
+          echo "::endgroup::"
 
       - name: 🏗️ 编译固件
         run: |

@@ -126,10 +126,9 @@ jobs:
         run: |
           cd openwrt
           echo "🔧 正在合并配置: 分支-${{ inputs.branch_config }}, 软件-${{ inputs.package_config }}, 架构-${{ inputs.target_arch }}"
-          ./scripts/kconfig/merge_config.sh -m -n \
-            ../configs/base/${{ inputs.target_arch }}_base.config \
-            ../configs/branch/${{ inputs.branch_config }}.config \
-            ../configs/packages/${{ inputs.package_config }}.config
+          cat ../configs/base/${{ inputs.target_arch }}_base.config \
+              ../configs/branch/${{ inputs.branch_config }}.config \
+              ../configs/packages/${{ inputs.package_config }}.config > .config
           echo "✅ 配置文件合并完成。"
 
       # 步骤 9: 运行自定义DIY脚本

@@ -1,3 +1,4 @@
+# .github/workflows/release.yml
 name: 创建官方发布版
 
 # 定义触发条件：当创建一个以 'v' 开头的标签时
@@ -17,6 +18,8 @@ jobs:
         target_arch: [ipq60xx]        # 在这里添加新架构例如 ipq80xx
     uses: ./.github/workflows/build.yml
     with:
+      # 为自动化任务固定使用最稳定的 ubuntu-22.04，如需要其它环境在此修改。
+      ubuntu_version: 'ubuntu-22.04'
       branch_config: ${{ matrix.branch_config }}
       package_config: ${{ matrix.package_config }}
       target_arch: ${{ matrix.target_arch }}
@@ -40,25 +43,29 @@ jobs:
         with:
           path: all-artifacts
 
-      # 生成 Release 的正文内容
+      # 为步骤添加 id，并修正产物遍历逻辑以支持多架构
       - name: 生成 Release 正文
+        id: generate_body # 添加 id
         run: |
           touch release_body.md
           echo "## 🚀 OpenWrt Firmware Release ${{ github.ref_name }}" >> release_body.md
           echo "" >> release_body.md
           echo "### ✅ Successful Builds" >> release_body.md
-          echo "| Branch | Package | Download |" >> release_body.md
-          echo "|---|---|---|" >> release_body.md
+          echo "| Branch | Package | Arch | Download |" >> release_body.md # 增加 Arch 列
+          echo "|---|---|---|---|" >> release_body.md
 
-          for dir in all-artifacts/openwrt-ipq60xx-*/; do
+          # 使用通配符 * 来匹配所有架构
+          for dir in all-artifacts/openwrt-*/; do
             if [ -d "$dir" ]; then
               dirname=$(basename "$dir")
+              # 解析产物名称，例如 openwrt-ipq60xx-openwrt_base-Pro
+              arch=$(echo $dirname | cut -d'-' -f2)
               branch=$(echo $dirname | cut -d'-' -f3)
               package=$(echo $dirname | cut -d'-' -f4)
               firmware_file=$(find "$dir" -name "*sysupgrade*" | head -n 1)
               if [ -n "$firmware_file" ]; then
                 filename=$(basename "$firmware_file")
-                echo "| $branch | $package | [$filename](./$filename) |" >> release_body.md
+                echo "| $branch | $package | $arch | [$filename](./$filename) |" >> release_body.md
               fi
             fi
           done
@@ -90,7 +97,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           name: Release ${{ github.ref_name }}
-          body: ${{ steps.generate_body.outputs.body }}
+          body: ${{ steps.generate_body.outputs.body }} 
           files: |
             all-artifacts/openwrt-*/**/*.bin
             all-artifacts/error-logs-*/**/*

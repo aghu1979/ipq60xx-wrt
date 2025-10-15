@@ -1,22 +1,27 @@
-name: Weekly Automatic Build
+name: 每周自动构建
 
+# 定义触发条件
 on:
+  # 使用 cron 表达式设置定时任务，这里是 UTC 时间每周四 16:00 (北京时间周五 0:00)
   schedule:
     - cron: '0 16 * * 4'
+  # 也允许手动触发
   workflow_dispatch:
 
 jobs:
   build-matrix:
+    # 使用矩阵策略，自动创建所有组合的并行任务
     strategy:
-      fail-fast: false
+      fail-fast: false # 一个任务失败，不影响其他任务继续运行
       matrix:
-        # 使用实际的分支配置文件名
+        # 定义矩阵的维度
         branch_config: [openwrt_base, immwrt_base, libwrt_base]
         package_config: [Pro, Max, Ultra]
-        target_arch: ['ipq60xx'] 
+        target_arch: [ipq60xx]        # 在这里添加新架构例如 ipq80xx
 
+    # 调用可复用工作流，并将矩阵中的值作为参数传入
     uses: ./.github/workflows/build.yml
     with:
       branch_config: ${{ matrix.branch_config }}
       package_config: ${{ matrix.package_config }}
-      target_arch: 'ipq60xx'
+      target_arch: ${{ matrix.target_arch }}

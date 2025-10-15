@@ -2,7 +2,6 @@
 name: Reusable OpenWrt Build Workflow
 
 # 【关键部分】声明这是一个可被其他工作流调用的模板
-# 如果没有下面这部分 "on: workflow_call:"，其他工作流就无法调用它
 on:
   workflow_call:
     inputs:
@@ -20,20 +19,15 @@ on:
         type: string
         default: 'ipq60xx'
         description: '目标芯片架构'
-      # 允许选择 Ubuntu 版本，默认为 22.04
       ubuntu_version:
-        description: '选择运行环境操作系统版本'
+        description: '使用最稳定的 ubuntu-22.04，如需要ubuntu-24.04或其它环境在此修改。'
         required: true
-        type: choice
+        type: string
         default: 'ubuntu-22.04'
-        options:
-        - ubuntu-22.04
-        - ubuntu-24.04
-        - ubuntu-latest
 
 jobs:
   build:
-    # 【关键修改】使用动态传入的 ubuntu_version，而不是硬编码
+    # 使用动态传入的 ubuntu_version，而不是硬编码
     runs-on: ${{ inputs.ubuntu_version }}
 
     steps:

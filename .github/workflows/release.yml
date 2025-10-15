@@ -14,7 +14,7 @@ jobs:
       matrix:
         branch_config: [openwrt_base, immwrt_base, libwrt_base]
         package_config: [Pro, Max, Ultra]
-        target_arch: [ipq60xx, ipq80xx]
+        target_arch: [ipq60xx]        # 在这里添加新架构例如 ipq80xx
     uses: ./.github/workflows/build.yml
     with:
       branch_config: ${{ matrix.branch_config }}

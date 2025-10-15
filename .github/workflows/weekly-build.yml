@@ -7,13 +7,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  # 【关键修改】第一阶段：并行编译所有分支的 Ultra 配置
+  # 第一阶段：并行编译所有分支的 Ultra 配置
   build-ultra:
     strategy:
       fail-fast: false
-      max-parallel: 3 # 【关键修改】设置最大并行数
+      max-parallel: 3
       matrix:
-        branch_config: [openwrt_base, immwrt_base, libwrt_base]
+        # 【关键修改】使用新的配置文件名
+        branch_config: [base_openwrt, base_immwrt, base_libwrt]
     uses: ./.github/workflows/build.yml
     with:
       ubuntu_version: 'ubuntu-22.04'
@@ -21,14 +22,14 @@ jobs:
       package_config: 'Ultra'
       target_arch: 'ipq60xx'
 
-  # 【关键修改】第二阶段：等待 Ultra 完成后，并行编译所有分支的 Max 配置
+  # 第二阶段：等待 Ultra 完成后，并行编译所有分支的 Max 配置
   build-max:
-    needs: build-ultra # 【关键修改】依赖第一阶段
+    needs: build-ultra
     strategy:
       fail-fast: false
-      max-parallel: 3 # 【关键修改】设置最大并行数
+      max-parallel: 3
       matrix:
-        branch_config: [openwrt_base, immwrt_base, libwrt_base]
+        branch_config: [base_openwrt, base_immwrt, base_libwrt]
     uses: ./.github/workflows/build.yml
     with:
       ubuntu_version: 'ubuntu-22.04'
@@ -36,14 +37,14 @@ jobs:
       package_config: 'Max'
       target_arch: 'ipq60xx'
 
-  # 【关键修改】第三阶段：等待 Max 完成后，并行编译所有分支的 Pro 配置
+  # 第三阶段：等待 Max 完成后，并行编译所有分支的 Pro 配置
   build-pro:
-    needs: build-max # 【关键修改】依赖第二阶段
+    needs: build-max
     strategy:
       fail-fast: false
-      max-parallel: 3 # 【关键修改】设置最大并行数
+      max-parallel: 3
       matrix:
-        branch_config: [openwrt_base, immwrt_base, libwrt_base]
+        branch_config: [base_openwrt, base_immwrt, base_libwrt]
     uses: ./.github/workflows/build.yml
     with:
       ubuntu_version: 'ubuntu-22.04'

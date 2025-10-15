@@ -32,6 +32,11 @@ jobs:
       GREEN: '\033[0;32m'
       YELLOW: '\033[1;33m'
       RED: '\033[0;31m'
+      BLUE: '\033[0;34m'
+      CYAN: '\033[0;36m'
+      MAGENTA: '\033[0;35m'
+      BOLD: '\033[1m'
+      BG_RED: '\033[41m'
       NC: '\033[0m' # No Color
 
     steps:
@@ -145,10 +150,92 @@ jobs:
           # 对比并显示 Luci 软件包的差异
           echo "::group::🔍 对比格式化前后的 Luci 软件包差异"
           echo "正在分析 'make defconfig' 对 Luci 软件包的影响..."
-          # 使用 diff 命令比较两个文件中包含 'CONFIG_PACKAGE_luci' 的行
-          # || true 是为了防止 diff 在没有差异时返回非零退出码，导致步骤失败
-          diff <(grep "CONFIG_PACKAGE_luci" .config.pre-defconfig | sort) <(grep "CONFIG_PACKAGE_luci" .config | sort) || true
-          echo "对比完成。"
+          
+          # 找出格式化前所有值为y的luci软件包
+          echo -e "\n${YELLOW}📋 格式化前启用的 Luci 软件包 (CONFIG_PACKAGE_luci*=y):${NC}"
+          grep "CONFIG_PACKAGE_luci.*=y" .config.pre-defconfig | sort > /tmp/luci_enabled_before.txt
+          cat /tmp/luci_enabled_before.txt
+          
+          # 检查这些软件包在格式化后的状态
+          echo -e "\n${YELLOW}📋 检查这些软件包在格式化后的状态:${NC}"
+          echo -e "${CYAN}格式 | 软件包名称 | 格式化前状态 | 格式化后状态 | 变化${NC}"
+          echo "------|------------|--------------|--------------|------"
+          
+          # 统计变量
+          total_packages=0
+          changed_packages=0
+          removed_packages=0
+          
+          while IFS= read -r line; do
+            pkg_name=$(echo "$line" | cut -d'=' -f1)
+            before_status=$(echo "$line" | cut -d'=' -f2)
+            total_packages=$((total_packages + 1))
+            
+            # 检查格式化后的状态
+            after_line=$(grep "^$pkg_name=" .config)
+            if [ -n "$after_line" ]; then
+              after_status=$(echo "$after_line" | cut -d'=' -f2)
+              if [ "$before_status" = "$after_status" ]; then
+                change="无变化"
+                echo -e "格式化 | $pkg_name | $before_status | $after_status | $change"
+              else
+                changed_packages=$((changed_packages + 1))
+                change="${RED}状态改变${NC}"
+                echo -e "格式化 | ${BOLD}$pkg_name${NC} | $before_status | ${RED}$after_status${NC} | $change"
+              fi
+            else
+              removed_packages=$((removed_packages + 1))
+              after_status="${RED}未找到${NC}"
+              change="${BG_RED}已移除${NC}"
+              echo -e "格式化 | ${BOLD}$pkg_name${NC} | $before_status | $after_status | $change"
+            fi
+          done < /tmp/luci_enabled_before.txt
+          
+          # 找出格式化后新增的luci软件包
+          echo -e "\n${YELLOW}📋 格式化后新增的 Luci 软件包:${NC}"
+          grep "CONFIG_PACKAGE_luci.*=y" .config | sort > /tmp/luci_enabled_after.txt
+          new_packages=$(comm -13 <(sort /tmp/luci_enabled_before.txt) <(sort /tmp/luci_enabled_after.txt))
+          if [ -n "$new_packages" ]; then
+            echo -e "${GREEN}$new_packages${NC}"
+          else
+            echo -e "${CYAN}无新增软件包${NC}"
+          fi
+          
+          # 显示统计信息
+          echo -e "\n${MAGENTA}📊 统计信息:${NC}"
+          echo -e "总软件包数: ${BOLD}$total_packages${NC}"
+          echo -e "状态改变: ${RED}$changed_packages${NC}"
+          echo -e "已移除: ${RED}$removed_packages${NC}"
+          echo -e "新增软件包: ${GREEN}$(echo "$new_packages" | grep -c . || echo 0)${NC}"
+          
+          # 显示完整的差异对比，高亮显示差异
+          echo -e "\n${YELLOW}📋 完整的 Luci 软件包差异对比:${NC}"
+          # 创建一个临时脚本来处理diff输出并高亮差异
+          cat > /tmp/highlight_diff.sh << 'EOF'
+          #!/bin/bash
+          while IFS= read -r line; do
+            case "$line" in
+              "<"*)
+                echo -e "${RED}$line${NC}"
+                ;;
+              ">"*)
+                echo -e "${GREEN}$line${NC}"
+                ;;
+              "---"*)
+                echo -e "${CYAN}$line${NC}"
+                ;;
+              *)
+                echo "$line"
+                ;;
+            esac
+          done
+          EOF
+          chmod +x /tmp/highlight_diff.sh
+          
+          # 使用diff并高亮显示差异
+          diff <(grep "CONFIG_PACKAGE_luci" .config.pre-defconfig | sort) <(grep "CONFIG_PACKAGE_luci" .config | sort) | /tmp/highlight_diff.sh || echo -e "${CYAN}无差异${NC}"
+          
+          echo -e "\n${GREEN}✅ Luci 软件包对比分析完成。${NC}"
           echo "::endgroup::"
 
       - name: 🏗️ 编译固件

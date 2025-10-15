@@ -1,7 +1,8 @@
 # .github/workflows/build.yml
 name: Reusable OpenWrt Build Workflow
 
-# 声明这是一个可被其他工作流调用的模板
+# 【关键部分】声明这是一个可被其他工作流调用的模板
+# 如果没有下面这部分 "on: workflow_call:"，其他工作流就无法调用它
 on:
   workflow_call:
     inputs:
@@ -32,7 +33,7 @@ on:
 
 jobs:
   build:
-    # 使用动态传入的 ubuntu_version，而不是硬编码
+    # 【关键修改】使用动态传入的 ubuntu_version，而不是硬编码
     runs-on: ${{ inputs.ubuntu_version }}
 
     steps:

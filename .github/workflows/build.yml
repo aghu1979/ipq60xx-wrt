@@ -1,0 +1,159 @@
+# .github/workflows/build.yml
+name: Reusable OpenWrt Build Workflow
+
+on:
+  workflow_call:
+    inputs:
+      branch_config:
+        required: true
+        type: string
+        description: '分支配置名，如 openwrt_base'
+      package_config:
+        required: true
+        type: string
+        description: '软件包配置名，如 Pro'
+      target_arch:
+        required: true
+        type: string
+        default: 'ipq60xx'
+        description: '目标芯片架构'
+      ubuntu_version:
+        description: '选择运行环境操作系统版本'
+        required: true
+        type: string
+        default: 'ubuntu-22.04'
+
+jobs:
+  build:
+    runs-on: ${{ inputs.ubuntu_version }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 缓存 OpenWrt 源码
+        id: cache-source
+        uses: actions/cache@v4
+        with:
+          path: openwrt
+          key: ${{ runner.os }}-${{ inputs.branch_config }}-source-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-${{ inputs.branch_config }}-source-
+
+      - name: 克隆源码
+        if: steps.cache-source.outputs.cache-hit != 'true'
+        run: |
+          if [ "${{ inputs.branch_config }}" == "immwrt_base" ]; then
+            REPO_URL="https://github.com/laipeng668/immortalwrt.git"
+            REPO_BRANCH="master"
+          elif [ "${{ inputs.branch_config }}" == "libwrt_base" ]; then
+            REPO_URL="https://github.com/laipeng668/openwrt-6.x.git"
+            REPO_BRANCH="k6.12-nss"
+          else
+            REPO_URL="https://github.com/laipeng668/openwrt.git"
+            REPO_BRANCH="master"
+          fi
+          echo "正在从 $REPO_URL (分支: $REPO_BRANCH) 克隆源码到 openwrt/ 目录"
+          git clone $REPO_URL -b $REPO_BRANCH openwrt
+
+      # 【关键修改】优化缓存键，使其只依赖于 feeds.conf.default，确保同分支共享缓存
+      - name: 缓存 Feeds 和下载包
+        id: cache-feeds-dl
+        uses: actions/cache@v4
+        with:
+          path: |
+            openwrt/dl
+            openwrt/feeds
+          key: ${{ runner.os }}-${{ inputs.branch_config }}-feeds-dl-${{ hashFiles('openwrt/feeds.conf.default') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ inputs.branch_config }}-feeds-dl-
+        if: success()
+
+      - name: Ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ inputs.target_arch }}-${{ inputs.branch_config }}
+          max-size: 5G
+
+      - name: 安装编译依赖
+        run: |
+          echo "::group::Installing System Dependencies on ${{ inputs.ubuntu_version }}"
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+          gcc-multilib g++-multilib gettext libelf-dev libssl-dev \
+          libncurses5-dev libncursesw5-dev python3-pyelftools \
+          python3-setuptools rsync swig unzip wget python3-pip ccache
+          echo "::endgroup::"
+
+      - name: 更新和安装 Feeds
+        if: steps.cache-feeds-dl.outputs.cache-hit != 'true'
+        run: |
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: 合并配置文件
+        run: |
+          cd openwrt
+          echo "🔧 正在合并配置: 分支-${{ inputs.branch_config }}, 软件-${{ inputs.package_config }}, 架构-${{ inputs.target_arch }}"
+          cat ../configs/base/${{ inputs.target_arch }}_base.config \
+              ../configs/branch/${{ inputs.branch_config }}.config \
+              ../configs/packages/${{ inputs.package_config }}.config > .config
+          echo "✅ 配置文件合并完成。"
+
+      - name: 运行自定义DIY脚本
+        run: |
+          cd openwrt
+          chmod +x $GITHUB_WORKSPACE/scripts/diy.sh
+          $GITHUB_WORKSPACE/scripts/diy.sh ${{ inputs.branch_config }} ${{ inputs.target_arch }}
+
+      - name: 编译固件
+        run: |
+          cd openwrt
+          echo "🚀 开始编译固件..."
+          make -j$(nproc) || (echo "❌ 并行编译失败，正在尝试单线程详细编译..." && make -j1 V=s)
+
+      - name: 收集固件产物
+        run: |
+          cd openwrt
+          mkdir -p ../firmware
+          find bin/targets/ -type f \( -name "*sysupgrade*" -o -name "*factory*" \) -exec cp {} ../firmware/ \;
+          echo "✅ 固件产物已收集。"
+          ls -lh ../firmware/
+
+      - name: 上传固件产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-${{ inputs.target_arch }}-${{ inputs.branch_config }}-${{ inputs.package_config }}
+          path: ./firmware/
+
+      - name: 上传错误日志 (仅在失败时)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-logs-${{ inputs.branch_config }}-${{ inputs.package_config }}
+          path: |
+            openwrt/build.log
+            openwrt/.config
+
+      - name: 生成构建摘要
+        if: always()
+        run: |
+          echo "## 📦 OpenWrt 构建摘要" >> $GITHUB_STEP_SUMMARY
+          echo "### 分支: ${{ inputs.branch_config }} | 软件: ${{ inputs.package_config }} | 架构: ${{ inputs.target_arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 目标文件 | 大小 | SHA256 |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -d "./firmware" ] && [ "$(ls -A ./firmware)" ]; then
+            for file in ./firmware/*; do
+              if [ -f "$file" ]; then
+                filename=$(basename "$file")
+                filesize=$(stat -c%s "$file" | awk '{printf "%.2f MB", $1/1024/1024}')
+                sha256=$(sha256sum "$file" | awk '{print $1}')
+                echo "| $filename | $filesize | \`$sha256\` |" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
+          else
+            echo "| 未生成固件文件 | - | - |" >> $GITHUB_STEP_SUMMARY
+          fi

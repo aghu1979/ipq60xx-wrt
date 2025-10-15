@@ -13,6 +13,7 @@ jobs:
         # 使用实际的分支配置文件名
         branch_config: [openwrt_base, immwrt_base, libwrt_base]
         package_config: [Pro, Max, Ultra]
+        target_arch: ['ipq60xx'] 
 
     uses: ./.github/workflows/build.yml
     with:

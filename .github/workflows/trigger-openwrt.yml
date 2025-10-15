@@ -1,19 +1,15 @@
 # .github/workflows/trigger-openwrt.yml
 name: 为 OpenWrt 分支触发构建
 
-# 定义触发条件
 on:
-  # 当代码被推送到 'openwrt' 分支，且特定文件有变动时
   push:
     branches: [ openwrt ]
     paths:
       - 'configs/**'
       - 'scripts/**'
       - '.github/workflows/**'
-  # 允许在 GitHub 页面上手动触发
   workflow_dispatch:
     inputs:
-      # 允许用户选择操作系统版本
       ubuntu_version:
         description: '选择运行环境操作系统版本'
         required: true
@@ -30,7 +26,7 @@ on:
         type: choice
         options:
         - ipq60xx
-        # - ipq80xx #（如需编译其它芯片在此添加或修改，同时添加相应config文件）
+        - ipq80xx
       package_profile:
         description: '选择软件包版本'
         required: true
@@ -43,11 +39,10 @@ on:
 
 jobs:
   build:
-    # 核心操作：调用我们定义好的可复用工作流 build.yml
     uses: ./.github/workflows/build.yml
     with:
-      # 传递所有参数给 build.yml，包括新增的 ubuntu_version
       ubuntu_version: ${{ inputs.ubuntu_version }}
-      branch_config: 'openwrt_base'
+      # 【关键修改】使用新的配置文件名
+      branch_config: 'base_openwrt'
       target_arch: ${{ inputs.target_arch || 'ipq60xx' }}
       package_config: ${{ inputs.package_profile || 'Pro' }}

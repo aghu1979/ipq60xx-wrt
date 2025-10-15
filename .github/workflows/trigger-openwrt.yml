@@ -1,14 +1,25 @@
-name: Trigger Build for OpenWrt Branch
+name: 为 OpenWrt 分支触发构建
 
+# 定义触发条件
 on:
+  # 当代码被推送到 'openwrt' 分支，且特定文件有变动时
   push:
     branches: [ openwrt ]
     paths:
       - 'configs/**'
       - 'scripts/**'
       - '.github/workflows/**'
+  # 允许在 GitHub 页面上手动触发
   workflow_dispatch:
     inputs:
+      target_arch:
+        description: '选择芯片架构'
+        required: true
+        default: 'ipq60xx'
+        type: choice
+        options:
+        - ipq60xx
+        - ipq80xx #（如需编译其它芯片在此添加或修改，同时添加相应config文件）
       package_profile:
         description: '选择软件包版本'
         required: true
@@ -21,8 +32,10 @@ on:
 
 jobs:
   build:
+    # 核心操作：调用我们定义好的可复用工作流 build.yml
     uses: ./.github/workflows/build.yml
     with:
+      # 传递参数给 build.yml
       branch_config: 'openwrt_base'
+      target_arch: ${{ inputs.target_arch || 'ipq60xx' }}
       package_config: ${{ inputs.package_profile || 'Pro' }}
-      target_arch: 'ipq60xx'

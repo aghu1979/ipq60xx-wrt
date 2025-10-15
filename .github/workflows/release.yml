@@ -1,0 +1,125 @@
+# .github/workflows/release.yml
+name: 创建官方发布版
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  # 【关键修改】第一阶段：并行编译所有分支的 Ultra 配置
+  build-ultra:
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        branch_config: [openwrt_base, immwrt_base, libwrt_base]
+    uses: ./.github/workflows/build.yml
+    with:
+      ubuntu_version: 'ubuntu-22.04'
+      branch_config: ${{ matrix.branch_config }}
+      package_config: 'Ultra'
+      target_arch: 'ipq60xx'
+
+  # 【关键修改】第二阶段：等待 Ultra 完成后，并行编译所有分支的 Max 配置
+  build-max:
+    needs: build-ultra
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        branch_config: [openwrt_base, immwrt_base, libwrt_base]
+    uses: ./.github/workflows/build.yml
+    with:
+      ubuntu_version: 'ubuntu-22.04'
+      branch_config: ${{ matrix.branch_config }}
+      package_config: 'Max'
+      target_arch: 'ipq60xx'
+
+  # 【关键修改】第三阶段：等待 Max 完成后，并行编译所有分支的 Pro 配置
+  build-pro:
+    needs: build-max
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        branch_config: [openwrt_base, immwrt_base, libwrt_base]
+    uses: ./.github/workflows/build.yml
+    with:
+      ubuntu_version: 'ubuntu-22.04'
+      branch_config: ${{ matrix.branch_config }}
+      package_config: 'Pro'
+      target_arch: 'ipq60xx'
+
+  # 【关键修改】Release 任务需要等待所有构建任务完成
+  create-release:
+    needs: [build-ultra, build-max, build-pro] # 【关键修改】依赖所有构建阶段
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载所有产物
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+
+      - name: 生成 Release 正文
+        id: generate_body
+        run: |
+          touch release_body.md
+          echo "## 🚀 OpenWrt Firmware Release ${{ github.ref_name }}" >> release_body.md
+          echo "" >> release_body.md
+          echo "### ✅ Successful Builds" >> release_body.md
+          echo "| Branch | Package | Arch | Download |" >> release_body.md
+          echo "|---|---|---|---|" >> release_body.md
+
+          for dir in all-artifacts/openwrt-*/; do
+            if [ -d "$dir" ]; then
+              dirname=$(basename "$dir")
+              arch=$(echo $dirname | cut -d'-' -f2)
+              branch=$(echo $dirname | cut -d'-' -f3)
+              package=$(echo $dirname | cut -d'-' -f4)
+              firmware_file=$(find "$dir" -name "*sysupgrade*" | head -n 1)
+              if [ -n "$firmware_file" ]; then
+                filename=$(basename "$firmware_file")
+                echo "| $branch | $package | $arch | [$filename](./$filename) |" >> release_body.md
+              fi
+            fi
+          done
+
+          echo "" >> release_body.md
+          echo "### ❌ Failed Builds & Error Logs" >> release_body.md
+          echo "<details>" >> release_body.md
+          echo "<summary>Click to view error logs</summary>" >> release_body.md
+          echo "" >> release_body.md
+          echo '```' >> release_body.md
+          for logfile in all-artifacts/error-logs-*/build.log; do
+            if [ -f "$logfile" ]; then
+              logdir=$(dirname "$logfile")
+              logname=$(basename "$logdir")
+              echo "#### 📄 Log for $logname" >> release_body.md
+              cat "$logfile" >> release_body.md
+              echo "" >> release_body.md
+            fi
+          done
+          echo '```' >> release_body.md
+          echo "</details>" >> release_body.md
+
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          cat release_body.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: 创建 Release 并上传资源
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ github.ref_name }}
+          body: ${{ steps.generate_body.outputs.body }}
+          files: |
+            all-artifacts/openwrt-*/**/*.bin
+            all-artifacts/error-logs-*/**/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}

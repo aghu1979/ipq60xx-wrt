@@ -1,4 +1,4 @@
-# .github/workflows/trigger-openwrt.yml
+# .github/workflows/trigger-immwrt.yml
 name: 为 ImmortalWrt 分支触发构建
 
 on:

@@ -1,0 +1,91 @@
+name: Create Official Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        # 使用实际的分支配置文件名
+        branch_config: [openwrt_base, immwrt_base, libwrt_base]
+        package_config: [Pro, Max, Ultra]
+    uses: ./.github/workflows/build.yml
+    with:
+      branch_config: ${{ matrix.branch_config }}
+      package_config: ${{ matrix.package_config }}
+      target_arch: 'ipq60xx'
+
+  create-release:
+    needs: build-matrix
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+
+      - name: Generate Release Body
+        id: generate_body
+        run: |
+          touch release_body.md
+          echo "## 🚀 OpenWrt Firmware Release ${{ github.ref_name }}" >> release_body.md
+          echo "" >> release_body.md
+          echo "### ✅ Successful Builds" >> release_body.md
+          echo "| Branch | Package | Download |" >> release_body.md
+          echo "|---|---|---|" >> release_body.md
+
+          for dir in all-artifacts/openwrt-ipq60xx-*/; do
+            if [ -d "$dir" ]; then
+              dirname=$(basename "$dir")
+              branch=$(echo $dirname | cut -d'-' -f3)
+              package=$(echo $dirname | cut -d'-' -f4)
+              firmware_file=$(find "$dir" -name "*sysupgrade*" | head -n 1)
+              if [ -n "$firmware_file" ]; then
+                filename=$(basename "$firmware_file")
+                echo "| $branch | $package | [$filename](./$filename) |" >> release_body.md
+              fi
+            fi
+          done
+
+          echo "" >> release_body.md
+          echo "### ❌ Failed Builds & Error Logs" >> release_body.md
+          echo "<details>" >> release_body.md
+          echo "<summary>Click to view error logs</summary>" >> release_body.md
+          echo "" >> release_body.md
+          echo '```' >> release_body.md
+          for logfile in all-artifacts/error-logs-*/build.log; do
+            if [ -f "$logfile" ]; then
+              logdir=$(dirname "$logfile")
+              logname=$(basename "$logdir")
+              echo "#### 📄 Log for $logname" >> release_body.md
+              cat "$logfile" >> release_body.md
+              echo "" >> release_body.md
+            fi
+          done
+          echo '```' >> release_body.md
+          echo "</details>" >> release_body.md
+
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          cat release_body.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ github.ref_name }}
+          body: ${{ steps.generate_body.outputs.body }}
+          files: |
+            all-artifacts/openwrt-ipq60xx-*/**/*.bin
+            all-artifacts/error-logs-*/**/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}

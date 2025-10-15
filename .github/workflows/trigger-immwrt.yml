@@ -1,0 +1,28 @@
+name: Trigger Build for ImmortalWrt Branch
+
+on:
+  push:
+    branches: [ immwrt ]
+    paths:
+      - 'configs/**'
+      - 'scripts/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+    inputs:
+      package_profile:
+        description: '选择软件包版本'
+        required: true
+        default: 'Pro'
+        type: choice
+        options:
+        - Pro
+        - Max
+        - Ultra
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      branch_config: 'immwrt_base'
+      package_config: ${{ inputs.package_profile || 'Pro' }}
+      target_arch: 'ipq60xx'

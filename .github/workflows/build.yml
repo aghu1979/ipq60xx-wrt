@@ -60,14 +60,14 @@ jobs:
         run: |
           # 根据传入的 branch_config 动态选择仓库地址
           if [ "${{ inputs.branch_config }}" == "immwrt_base" ]; then
-            REPO_URL="https://github.com/immortalwrt/immortalwrt.git"
+            REPO_URL="https://github.com/laipeng668/immortalwrt.git"
             REPO_BRANCH="master"
           elif [ "${{ inputs.branch_config }}" == "libwrt_base" ]; then
-            REPO_URL="https://github.com/LibreWrt/LibreWrt.git"
-            REPO_BRANCH="main"
+            REPO_URL="https://github.com/laipeng668/openwrt-6.x.git"
+            REPO_BRANCH="k6.12-nss"
           else # 默认为 openwrt
-            REPO_URL="https://github.com/openwrt/openwrt.git"
-            REPO_BRANCH="openwrt-23.05"
+            REPO_URL="https://github.com/laipeng668/openwrt.git"
+            REPO_BRANCH="master"
           fi
           echo "正在从 $REPO_URL (分支: $REPO_BRANCH) 克隆源码到 openwrt/ 目录"
           git clone $REPO_URL -b $REPO_BRANCH openwrt

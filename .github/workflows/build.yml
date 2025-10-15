@@ -1,39 +1,55 @@
 # .github/workflows/build.yml
 name: Reusable OpenWrt Build Workflow
 
+# 声明这是一个可被其他工作流调用的模板
 on:
   workflow_call:
     inputs:
+      # 定义调用时需要传入的参数，就像烤箱上的旋钮
       branch_config:
         required: true
         type: string
+        description: '分支配置名，如 openwrt_base'
       package_config:
         required: true
         type: string
+        description: '软件包配置名，如 Pro'
       target_arch:
         required: true
         type: string
         default: 'ipq60xx'
+        description: '目标芯片架构'
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      # 步骤 1: 检出代码
+      # 将我们自己仓库的代码下载到运行环境中
+      - name: 检出代码
         uses: actions/checkout@v4
 
       # ===== 缓存策略开始 =====
-      - name: Cache OpenWrt Source Code
+      # 缓存是提升效率的关键，就像把常用的食材提前准备好，不用每次都去超市采购
+
+      # 步骤 2: 缓存 OpenWrt 源码
+      # 优化点：避免每次都重新 git clone，节省时间
+      - name: 缓存 OpenWrt 源码
         id: cache-source
         uses: actions/cache@v4
         with:
           path: openwrt
+          # 缓存键：基于操作系统、分支配置和当前提交的唯一ID
+          # 确保代码有变动时，缓存会失效，保证编译正确性
           key: ${{ runner.os }}-${{ inputs.branch_config }}-source-${{ github.sha }}
+          # 恢复键：如果上面的精确缓存没命中，就尝试恢复同分支的最新缓存
           restore-keys: |
             ${{ runner.os }}-${{ inputs.branch_config }}-source-
 
-      - name: Clone Source Code
+      # 步骤 3: 克隆源码 (如果缓存未命中)
+      # 只有当源码缓存不存在时，才执行 git clone
+      - name: 克隆源码
         if: steps.cache-source.outputs.cache-hit != 'true'
         run: |
           # 根据传入的 branch_config 动态选择仓库地址
@@ -47,29 +63,39 @@ jobs:
             REPO_URL="https://github.com/openwrt/openwrt.git"
             REPO_BRANCH="openwrt-23.05"
           fi
-          echo "Cloning from $REPO_URL (branch: $REPO_BRANCH) into openwrt/"
+          echo "正在从 $REPO_URL (分支: $REPO_BRANCH) 克隆源码到 openwrt/ 目录"
           git clone $REPO_URL -b $REPO_BRANCH openwrt
 
-      - name: Cache Feeds & Downloads
+      # 步骤 4: 缓存 Feeds 和下载包
+      # 优化点：这是最重要的缓存！dl 和 feeds 目录包含了所有软件包的源码，下载最耗时
+      - name: 缓存 Feeds 和下载包
         id: cache-feeds-dl
         uses: actions/cache@v4
         with:
           path: |
             openwrt/dl
             openwrt/feeds
+          # 缓存键：基于操作系统、分支配置和所有配置文件的内容哈希
+          # 优化点：将 branch_config 加入键，实现分支级缓存隔离！
           key: ${{ runner.os }}-${{ inputs.branch_config }}-feeds-dl-${{ hashFiles('openwrt/feeds.conf.default', 'configs/**') }}
           restore-keys: |
             ${{ runner.os }}-${{ inputs.branch_config }}-feeds-dl-
         if: success()
 
+      # 步骤 5: 缓存 Ccache (编译器缓存)
+      # 优化点：缓存编译过程中的中间文件，让增量编译飞快
       - name: Ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
+          # 缓存键：基于目标架构和分支配置
           key: ${{ inputs.target_arch }}-${{ inputs.branch_config }}
+          # 最大缓存大小，可以根据需要调整
           max-size: 5G
       # ===== 缓存策略结束 =====
 
-      - name: Install Dependencies
+      # 步骤 6: 安装编译依赖
+      # 安装编译 OpenWrt 所需的系统工具
+      - name: 安装编译依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang flex bison g++ gawk \
@@ -77,51 +103,67 @@ jobs:
           libncurses5-dev libncursesw5-dev python3-distutils python3-pyelftools \
           python3-setuptools rsync swig unzip wget python3-pip
 
-      - name: Update Feeds
-        # 只有当 Feeds 缓存未命中时，才执行更新
+      # 步骤 7: 更新和安装 Feeds
+      # 只有当 Feeds 缓存未命中时，才执行更新
+      - name: 更新和安装 Feeds
         if: steps.cache-feeds-dl.outputs.cache-hit != 'true'
         run: |
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Merge Configurations
+      # 步骤 8: 合并配置文件
+      # 将我们定义的模块化配置文件合并成一个最终的 .config
+      - name: 合并配置文件
         run: |
           cd openwrt
-          echo "🔧 Merging configurations for branch: ${{ inputs.branch_config }}, package: ${{ inputs.package_config }}"
+          echo "🔧 正在合并配置: 分支-${{ inputs.branch_config }}, 软件-${{ inputs.package_config }}, 架构-${{ inputs.target_arch }}"
           ./scripts/kconfig/merge_config.sh -m -n \
             ../configs/base/${{ inputs.target_arch }}_base.config \
             ../configs/branch/${{ inputs.branch_config }}.config \
             ../configs/packages/${{ inputs.package_config }}.config
-          echo "✅ Configuration merge complete."
+          echo "✅ 配置文件合并完成。"
 
-      - name: Run DIY Script
+      # 步骤 9: 运行自定义DIY脚本
+      # 集成点：在这里调用我们的 diy.sh 脚本，进行个性化定制
+      - name: 运行自定义DIY脚本
         run: |
           cd openwrt
           chmod +x $GITHUB_WORKSPACE/scripts/diy.sh
+          # 将分支和芯片信息作为参数传给脚本
           $GITHUB_WORKSPACE/scripts/diy.sh ${{ inputs.branch_config }} ${{ inputs.target_arch }}
 
-      - name: Build Firmware
+      # 步骤 10: 编译固件
+      # 正式开始编译，使用多核加速
+      - name: 编译固件
         run: |
           cd openwrt
-          echo "🚀 Starting firmware build..."
-          make -j$(nproc) || (echo "❌ Parallel build failed, trying single-threaded with verbose output..." && make -j1 V=s)
+          echo "🚀 开始编译固件..."
+          # 如果并行编译失败，则尝试单线程详细编译，方便排错
+          make -j$(nproc) || (echo "❌ 并行编译失败，正在尝试单线程详细编译..." && make -j1 V=s)
 
-      - name: Collect Artifacts
+      # 步骤 11: 收集固件产物
+      # 从编译输出目录中找到我们需要的固件文件
+      - name: 收集固件产物
         run: |
           cd openwrt
           mkdir -p ../firmware
           find bin/targets/ -type f \( -name "*sysupgrade*" -o -name "*factory*" \) -exec cp {} ../firmware/ \;
-          echo "✅ Artifacts collected."
+          echo "✅ 固件产物已收集。"
           ls -lh ../firmware/
 
-      - name: Upload Artifacts
+      # 步骤 12: 上传固件产物
+      # 将编译好的固件上传，以便下载
+      - name: 上传固件产物
         uses: actions/upload-artifact@v4
         with:
+          # 产物名称包含所有关键信息，方便识别
           name: openwrt-${{ inputs.target_arch }}-${{ inputs.branch_config }}-${{ inputs.package_config }}
           path: ./firmware/
 
-      - name: Upload Error Logs on Failure
+      # 步骤 13: 上传错误日志 (仅在失败时)
+      # 如果编译失败，把日志和配置文件上传，方便分析问题
+      - name: 上传错误日志 (仅在失败时)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -130,24 +172,26 @@ jobs:
             openwrt/build.log
             openwrt/.config
 
-      - name: Generate Build Summary
+      # 步骤 14: 生成构建摘要
+      # 在 GitHub Actions 的摘要页面生成一个漂亮的报告
+      - name: 生成构建摘要
         if: always()
         run: |
-          echo "## 📦 OpenWrt Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "### Branch: ${{ inputs.branch_config }} | Package: ${{ inputs.package_config }}" >> $GITHUB_STEP_SUMMARY
+          echo "## 📦 OpenWrt 构建摘要" >> $GITHUB_STEP_SUMMARY
+          echo "### 分支: ${{ inputs.branch_config }} | 软件: ${{ inputs.package_config }} | 架构: ${{ inputs.target_arch }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Target File | Size (Bytes) | SHA256 |" >> $GITHUB_STEP_SUMMARY
+          echo "| 目标文件 | 大小 | SHA256 |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
           
           if [ -d "./firmware" ] && [ "$(ls -A ./firmware)" ]; then
             for file in ./firmware/*; do
               if [ -f "$file" ]; then
                 filename=$(basename "$file")
-                filesize=$(stat -c%s "$file")
+                filesize=$(stat -c%s "$file" | awk '{printf "%.2f MB", $1/1024/1024}')
                 sha256=$(sha256sum "$file" | awk '{print $1}')
                 echo "| $filename | $filesize | \`$sha256\` |" >> $GITHUB_STEP_SUMMARY
               fi
             done
           else
-            echo "| No firmware files generated. | - | - |" >> $GITHUB_STEP_SUMMARY
+            echo "| 未生成固件文件 | - | - |" >> $GITHUB_STEP_SUMMARY
           fi

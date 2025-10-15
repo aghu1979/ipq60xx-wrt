@@ -19,10 +19,20 @@ on:
         type: string
         default: 'ipq60xx'
         description: '目标芯片架构'
+      # 允许选择 Ubuntu 版本，默认为 22.04
+      ubuntu_version:
+        description: '选择运行环境操作系统版本'
+        required: true
+        type: choice
+        default: 'ubuntu-22.04'
+        options:
+        - ubuntu-22.04
+        - ubuntu-24.04
+        - ubuntu-latest
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.ubuntu_version }}
 
     steps:
       # 步骤 1: 检出代码
@@ -94,14 +104,16 @@ jobs:
       # ===== 缓存策略结束 =====
 
       # 步骤 6: 安装编译依赖
-      # 安装编译 OpenWrt 所需的系统工具
+      # 使用 python3-setuptools 替代 python3-distutils，以兼容 Ubuntu 22.04 和 24.04
       - name: 安装编译依赖
         run: |
+          echo "::group::Installing System Dependencies on ${{ inputs.ubuntu_version }}"
           sudo apt-get update
           sudo apt-get install -y build-essential clang flex bison g++ gawk \
           gcc-multilib g++-multilib gettext libelf-dev libssl-dev \
-          libncurses5-dev libncursesw5-dev python3-distutils python3-pyelftools \
-          python3-setuptools rsync swig unzip wget python3-pip
+          libncurses5-dev libncursesw5-dev python3-pyelftools \
+          python3-setuptools rsync swig unzip wget python3-pip ccache
+          echo "::endgroup::"
 
       # 步骤 7: 更新和安装 Feeds
       # 只有当 Feeds 缓存未命中时，才执行更新

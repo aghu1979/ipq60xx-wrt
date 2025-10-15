@@ -19,7 +19,7 @@ on:
         type: choice
         options:
         - ipq60xx
-        - ipq80xx #（如需编译其它芯片在此添加或修改，同时添加相应config文件）
+        # - ipq80xx #（如需编译其它芯片在此添加或修改，同时添加相应config文件）
       package_profile:
         description: '选择软件包版本'
         required: true

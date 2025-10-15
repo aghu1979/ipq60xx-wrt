@@ -51,9 +51,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt
-          key: ${{ runner.os }}-${{ inputs.branch_config }}-source-${{ github.sha }}
+          # 修复: 移除 github.sha 以便在相同配置下复用缓存
+          key: ${{ runner.os }}-source-${{ inputs.branch_config }}-${{ inputs.target_arch }}
           restore-keys: |
-            ${{ runner.os }}-${{ inputs.branch_config }}-source-
+            ${{ runner.os }}-source-${{ inputs.branch_config }}-
+            ${{ runner.os }}-source-
       
       - name: 📥 克隆源码
         if: steps.cache-source.outputs.cache-hit != 'true'
@@ -80,9 +82,11 @@ jobs:
           path: |
             openwrt/dl
             openwrt/feeds
-          key: ${{ runner.os }}-${{ inputs.branch_config }}-feeds-dl
+          # 这个key是稳定的，只要源码缓存命中，它就能正常工作
+          key: ${{ runner.os }}-feeds-dl-${{ inputs.branch_config }}
           restore-keys: |
-            ${{ runner.os }}-${{ inputs.branch_config }}-feeds-dl-
+            ${{ runner.os }}-feeds-dl-${{ inputs.branch_config }}-
+            ${{ runner.os }}-feeds-dl-
         if: success()
 
       - name: 🛠️ 安装编译依赖
@@ -166,13 +170,14 @@ jobs:
           changed_packages=0
           removed_packages=0
           
+          # 修复: 使用进程替换，避免子shell，使变量能正确累加
           while IFS= read -r line; do
             pkg_name=$(echo "$line" | cut -d'=' -f1)
             before_status=$(echo "$line" | cut -d'=' -f2)
             total_packages=$((total_packages + 1))
             
-            # 检查格式化后的状态
-            after_line=$(grep "^$pkg_name=" .config)
+            # 修复: 在grep后添加 || true，防止找不到包时脚本因 bash -e 而退出
+            after_line=$(grep "^$pkg_name=" .config || true)
             if [ -n "$after_line" ]; then
               after_status=$(echo "$after_line" | cut -d'=' -f2)
               if [ "$before_status" = "$after_status" ]; then
@@ -189,12 +194,12 @@ jobs:
               change="${BG_RED}已移除${NC}"
               echo -e "格式化 | ${BOLD}$pkg_name${NC} | $before_status | $after_status | $change"
             fi
-          done < /tmp/luci_enabled_before.txt
+          done < <(cat /tmp/luci_enabled_before.txt)
           
           # 找出格式化后新增的luci软件包
           echo -e "\n${YELLOW}📋 格式化后新增的 Luci 软件包:${NC}"
           grep "CONFIG_PACKAGE_luci.*=y" .config | sort > /tmp/luci_enabled_after.txt
-          new_packages=$(comm -13 <(sort /tmp/luci_enabled_before.txt) <(sort /tmp/luci_enabled_after.txt))
+          new_packages=$(comm -13 <(sort /tmp/luci_enabled_before.txt) <(sort /tmp/luci_enabled_after.txt) || true)
           if [ -n "$new_packages" ]; then
             echo -e "${GREEN}$new_packages${NC}"
           else
@@ -206,6 +211,7 @@ jobs:
           echo -e "总软件包数: ${BOLD}$total_packages${NC}"
           echo -e "状态改变: ${RED}$changed_packages${NC}"
           echo -e "已移除: ${RED}$removed_packages${NC}"
+          # 修复: 更健壮地计算新增包数量
           echo -e "新增软件包: ${GREEN}$(echo "$new_packages" | grep -c . || echo 0)${NC}"
           
           # 显示完整的差异对比，高亮显示差异
@@ -238,10 +244,31 @@ jobs:
           echo -e "\n${GREEN}✅ Luci 软件包对比分析完成。${NC}"
           echo "::endgroup::"
 
+      # 新增：缓存 ccache 和编译产物以实现增量编译
+      - name: 💾 缓存 ccache 和编译产物
+        id: cache-build
+        uses: actions/cache@v4
+        with:
+          path: |
+            openwrt/.ccache
+            openwrt/build_dir
+            openwrt/staging_dir
+          # Key 基于配置文件内容，确保配置变化时缓存失效
+          key: ${{ runner.os }}-build-${{ inputs.branch_config }}-${{ inputs.target_arch }}-${{ hashFiles('openwrt/.config') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ inputs.branch_config }}-${{ inputs.target_arch }}-
+            ${{ runner.os }}-build-${{ inputs.branch_config }}-
+            ${{ runner.os }}-build-
+
       - name: 🏗️ 编译固件
         run: |
           cd openwrt
           echo -e "${YELLOW}🚀 开始编译固件... (这可能需要很长时间)${NC}"
+          if [ "${{ steps.cache-build.outputs.cache-hit }}" == "true" ]; then
+            echo -e "${GREEN}✅ 编译产物缓存命中，将进行增量编译。${NC}"
+          else
+            echo -e "${YELLOW}⚠️ 编译产物缓存未命中，将进行完整编译。${NC}"
+          fi
           make -j$(nproc) || (echo -e "${RED}❌ 并行编译失败，正在尝试单线程详细编译...${NC}" && make -j1 V=s)
           echo -e "${GREEN}✅ 固件编译完成。${NC}"
 

@@ -7,7 +7,7 @@ on:
       branch_config:
         required: true
         type: string
-        description: '分支配置名，如 openwrt_base'
+        description: '分支配置名，如 base_openwrt'
       package_config:
         required: true
         type: string
@@ -27,11 +27,21 @@ jobs:
   build:
     runs-on: ${{ inputs.ubuntu_version }}
 
+    # 定义彩色输出变量
+    env:
+      GREEN: '\033[0;32m'
+      YELLOW: '\033[1;33m'
+      RED: '\033[0;31m'
+      NC: '\033[0m' # No Color
+
     steps:
-      - name: 检出代码
+      - name: 🚀 准备就绪
+        run: echo -e "${GREEN}▶️ 开始执行 OpenWrt 自动化构建流程...${NC}"
+
+      - name: 📥 检出代码
         uses: actions/checkout@v4
 
-      - name: 缓存 OpenWrt 源码
+      - name: 💾 缓存 OpenWrt 源码
         id: cache-source
         uses: actions/cache@v4
         with:
@@ -39,14 +49,15 @@ jobs:
           key: ${{ runner.os }}-${{ inputs.branch_config }}-source-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-${{ inputs.branch_config }}-source-
-
-      - name: 克隆源码
+      
+      - name: 📥 克隆源码
         if: steps.cache-source.outputs.cache-hit != 'true'
         run: |
-          if [ "${{ inputs.branch_config }}" == "immwrt_base" ]; then
+          echo -e "${YELLOW}⬇️ 缓存未命中，正在从远程克隆源码...${NC}"
+          if [ "${{ inputs.branch_config }}" == "base_immwrt" ]; then
             REPO_URL="https://github.com/laipeng668/immortalwrt.git"
             REPO_BRANCH="master"
-          elif [ "${{ inputs.branch_config }}" == "libwrt_base" ]; then
+          elif [ "${{ inputs.branch_config }}" == "base_libwrt" ]; then
             REPO_URL="https://github.com/laipeng668/openwrt-6.x.git"
             REPO_BRANCH="k6.12-nss"
           else
@@ -55,9 +66,9 @@ jobs:
           fi
           echo "正在从 $REPO_URL (分支: $REPO_BRANCH) 克隆源码到 openwrt/ 目录"
           git clone $REPO_URL -b $REPO_BRANCH openwrt
+          echo -e "${GREEN}✅ 源码克隆完成。${NC}"
 
-      # 【关键修改】优化缓存键，使其只依赖于 feeds.conf.default，确保同分支共享缓存
-      - name: 缓存 Feeds 和下载包
+      - name: 💾 缓存 Feeds 和下载包
         id: cache-feeds-dl
         uses: actions/cache@v4
         with:
@@ -69,65 +80,70 @@ jobs:
             ${{ runner.os }}-${{ inputs.branch_config }}-feeds-dl-
         if: success()
 
-      - name: Ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ${{ inputs.target_arch }}-${{ inputs.branch_config }}
-          max-size: 5G
-
-      - name: 安装编译依赖
+      - name: 🛠️ 安装编译依赖
         run: |
-          echo "::group::Installing System Dependencies on ${{ inputs.ubuntu_version }}"
+          echo -e "${YELLOW}🔧 正在安装编译依赖...${NC}"
           sudo apt-get update
           sudo apt-get install -y build-essential clang flex bison g++ gawk \
           gcc-multilib g++-multilib gettext libelf-dev libssl-dev \
           libncurses5-dev libncursesw5-dev python3-pyelftools \
           python3-setuptools rsync swig unzip wget python3-pip ccache
-          echo "::endgroup::"
+          echo -e "${GREEN}✅ 编译依赖安装完成。${NC}"
 
-      - name: 更新和安装 Feeds
+      - name: 🔄 更新和安装 Feeds
         if: steps.cache-feeds-dl.outputs.cache-hit != 'true'
         run: |
+          echo -e "${YELLOW}🔄 缓存未命中，正在更新和安装 Feeds...${NC}"
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+          echo -e "${GREEN}✅ Feeds 更新和安装完成。${NC}"
 
-      - name: 合并配置文件
+      - name: 🔧 合并配置文件
         run: |
           cd openwrt
-          echo "🔧 正在合并配置: 分支-${{ inputs.branch_config }}, 软件-${{ inputs.package_config }}, 架构-${{ inputs.target_arch }}"
-          cat ../configs/base/${{ inputs.target_arch }}_base.config \
-              ../configs/branch/${{ inputs.branch_config }}.config \
-              ../configs/packages/${{ inputs.package_config }}.config > .config
-          echo "✅ 配置文件合并完成。"
+          echo -e "${YELLOW}🔧 正在合并配置: 分支-${{ inputs.branch_config }}, 软件-${{ inputs.package_config }}, 架构-${{ inputs.target_arch }}${NC}"
+          # 【关键修改】根据新的文件路径合并
+          cat ../configs/${{ inputs.target_arch }}_base.config \
+              ../configs/${{ inputs.branch_config }}.config \
+              ../configs/${{ inputs.package_config }}.config > .config
+          echo -e "${GREEN}✅ 配置文件合并完成。${NC}"
+          
+          # 将合并后的内容输出到日志，方便调试
+          echo "::group::📄 查看最终合并的 .config 文件内容"
+          cat .config
+          echo "::endgroup::"
 
-      - name: 运行自定义DIY脚本
+      - name: 🧪 运行自定义DIY脚本
         run: |
           cd openwrt
+          echo -e "${YELLOW}🧪 正在运行自定义DIY脚本...${NC}"
           chmod +x $GITHUB_WORKSPACE/scripts/diy.sh
           $GITHUB_WORKSPACE/scripts/diy.sh ${{ inputs.branch_config }} ${{ inputs.target_arch }}
+          echo -e "${GREEN}✅ DIY脚本执行完成。${NC}"
 
-      - name: 编译固件
+      - name: 🏗️ 编译固件
         run: |
           cd openwrt
-          echo "🚀 开始编译固件..."
-          make -j$(nproc) || (echo "❌ 并行编译失败，正在尝试单线程详细编译..." && make -j1 V=s)
+          echo -e "${YELLOW}🚀 开始编译固件... (这可能需要很长时间)${NC}"
+          make -j$(nproc) || (echo -e "${RED}❌ 并行编译失败，正在尝试单线程详细编译...${NC}" && make -j1 V=s)
+          echo -e "${GREEN}✅ 固件编译完成。${NC}"
 
-      - name: 收集固件产物
+      - name: 📦 收集固件产物
         run: |
           cd openwrt
           mkdir -p ../firmware
           find bin/targets/ -type f \( -name "*sysupgrade*" -o -name "*factory*" \) -exec cp {} ../firmware/ \;
-          echo "✅ 固件产物已收集。"
+          echo -e "${GREEN}✅ 固件产物已收集。${NC}"
           ls -lh ../firmware/
 
-      - name: 上传固件产物
+      - name: 📤 上传固件产物
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-${{ inputs.target_arch }}-${{ inputs.branch_config }}-${{ inputs.package_config }}
           path: ./firmware/
 
-      - name: 上传错误日志 (仅在失败时)
+      - name: 📤 上传错误日志 (仅在失败时)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -136,7 +152,7 @@ jobs:
             openwrt/build.log
             openwrt/.config
 
-      - name: 生成构建摘要
+      - name: 📋 生成构建摘要
         if: always()
         run: |
           echo "## 📦 OpenWrt 构建摘要" >> $GITHUB_STEP_SUMMARY
